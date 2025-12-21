@@ -1,0 +1,9 @@
+{
+  "name": "FlareFinder AI",
+  "description": "An intelligent autoimmune tracker that uses computer vision and pattern recognition to identify flare triggers for HS and other conditions.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
