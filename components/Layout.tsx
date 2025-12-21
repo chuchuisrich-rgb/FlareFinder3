@@ -76,7 +76,8 @@ const NavButton = ({ active, onClick, icon, label }: { active: boolean, onClick:
       active ? 'text-teal-600' : 'text-slate-400 hover:text-slate-600'
     }`}
   >
-    {React.cloneElement(icon as React.ReactElement, { 
+    {/* Fixed: Cast icon to React.ReactElement<any> to allow className and strokeWidth properties in cloneElement */}
+    {React.cloneElement(icon as React.ReactElement<any>, { 
       className: `w-6 h-6 ${active ? 'fill-current opacity-20' : ''}`, 
       strokeWidth: active ? 2.5 : 2
     })}
