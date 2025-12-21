@@ -4,9 +4,10 @@ import { AppState, FoodLog, BehaviorLog, Reminder, UserProfile, DeepAnalysis, Ma
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Synchronize PDF.js worker with the exact version in index.html to prevent mismatch errors.
+// Synchronize PDF.js worker using environment variable with a safe fallback
+// to match the version specified in index.html.
 if (typeof window !== 'undefined' && pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
-    const WORKER_VERSION = '4.0.379';
+    const WORKER_VERSION = process.env.WORKER_VERSION || '4.0.379';
     pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${WORKER_VERSION}/build/pdf.worker.min.mjs`;
 }
 
@@ -20,8 +21,9 @@ const getAiClient = () => {
 };
 
 /**
- * Enhanced robust JSON parser that handles markdown blocks and attempts to 
- * repair truncated JSON by closing open brackets/braces.
+ * Enhanced robust JSON parser. 
+ * Specifically handles truncation errors where the AI hits the token limit 
+ * mid-object or mid-array (the "Expected ',' or ']'" error).
  */
 const safeJsonParse = (text: string | undefined | null) => {
     if (!text) return null;
@@ -30,49 +32,52 @@ const safeJsonParse = (text: string | undefined | null) => {
     try {
         return JSON.parse(cleanText);
     } catch (e) {
-        console.warn("Initial JSON parse failed, attempting deep recovery...");
+        console.warn("Initial JSON parse failed. Attempting repair for truncation...");
         
-        // Strategy 1: Find the actual JSON substring
+        // Find the start of the JSON
         const startChar = cleanText.search(/\{|\[/);
-        const endChar = Math.max(cleanText.lastIndexOf('}'), cleanText.lastIndexOf(']'));
+        if (startChar === -1) throw new Error("No JSON found in response.");
         
-        if (startChar !== -1 && endChar !== -1 && endChar > startChar) {
-            const substring = cleanText.substring(startChar, endChar + 1);
-            try {
-                return JSON.parse(substring);
-            } catch (innerE) {
-                // Strategy 2: Attempt to fix truncation by appending closing tags
-                // This handles the "Expected ',' or ']'" error when the model cuts off mid-array
-                let attempt = substring;
-                const stack = [];
-                for (const char of attempt) {
-                    if (char === '{' || char === '[') stack.push(char === '{' ? '}' : ']');
-                    else if (char === '}' || char === ']') stack.pop();
-                }
-                
-                // Try closing in reverse order of stack
-                while (stack.length > 0) {
-                    attempt += stack.pop();
-                    try {
-                        return JSON.parse(attempt);
-                    } catch (finalE) { /* continue until exhausted */ }
-                }
-                
-                // Strategy 3: Hard-truncate to last valid object in an array if it looks like an array
-                if (substring.startsWith('[') || substring.includes('"sensitivities": [')) {
-                    const lastValidObject = substring.lastIndexOf('}');
-                    if (lastValidObject !== -1) {
-                        let partial = substring.substring(0, lastValidObject + 1);
-                        if (!partial.endsWith(']')) partial += ']';
-                        if (substring.includes('{') && !partial.endsWith('}')) partial += '}';
-                        try {
-                           return JSON.parse(partial);
-                        } catch (lastE) {}
-                    }
-                }
-            }
+        let jsonSub = cleanText.substring(startChar);
+
+        // Attempt recovery from truncation
+        // This is usually caused by the model hitting maxOutputTokens.
+        // We backtrack to the last completed object or array element.
+        
+        const tryParse = (str: string) => {
+            try { return JSON.parse(str); } catch { return null; }
+        };
+
+        // If it looks like an object/array that was cut off:
+        // 1. Try to close it simply
+        const closers = ['}', ']}', '}]}', '"]}', '"]}'];
+        for (const closer of closers) {
+            const repaired = tryParse(jsonSub + closer);
+            if (repaired) return repaired;
         }
-        throw new Error("AI returned invalid data format. Please try again with a smaller or clearer file.");
+
+        // 2. Backtrack to the last closing brace and close the structure
+        // This handles cases where the model stops mid-property name or mid-value
+        const lastBrace = jsonSub.lastIndexOf('}');
+        const lastBracket = jsonSub.lastIndexOf(']');
+        const cutPoint = Math.max(lastBrace, lastBracket);
+        
+        if (cutPoint !== -1) {
+            let partial = jsonSub.substring(0, cutPoint + 1);
+            // If it was an array of objects inside a main object, it might need ']}'
+            if (jsonSub.startsWith('{') && !partial.endsWith('}')) {
+                const repaired = tryParse(partial + ']}') || tryParse(partial + '}');
+                if (repaired) return repaired;
+            }
+            if (jsonSub.startsWith('[') && !partial.endsWith(']')) {
+                const repaired = tryParse(partial + ']');
+                if (repaired) return repaired;
+            }
+            const directAttempt = tryParse(partial);
+            if (directAttempt) return directAttempt;
+        }
+
+        throw new Error("AI output was truncated too severely to recover. Try processing fewer pages or a smaller file.");
     }
 };
 
@@ -398,7 +403,8 @@ export const parseLabResults = async (
 
   if (mimeType === 'application/pdf') {
       const pages = await extractPdfPages(base64Data);
-      const CHUNK_SIZE = 5; // Process in 5-page chunks to avoid output truncation
+      // Decreased CHUNK_SIZE to 3 pages to reduce likelihood of output truncation
+      const CHUNK_SIZE = 3; 
       for (let i = 0; i < pages.length; i += CHUNK_SIZE) {
           const chunk = pages.slice(i, i + CHUNK_SIZE).join('\n');
           const result = await processChunk(chunk, `pages ${i + 1} to ${Math.min(i + CHUNK_SIZE, pages.length)}`);
