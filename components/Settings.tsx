@@ -1,12 +1,13 @@
 
 import React, { useState } from 'react';
 import { db } from '../services/db';
-import { ShieldAlert, FileText, User, LogOut, Heart, Trash2, Info, ExternalLink, ShieldCheck, Scale } from 'lucide-react';
+import { ShieldAlert, FileText, User, LogOut, Heart, Trash2, Info, ExternalLink, ShieldCheck, Scale, Download, Upload, RefreshCw, Database } from 'lucide-react';
 
 export const Settings: React.FC = () => {
   const state = db.getState();
   const user = state.user;
   const [showTerms, setShowTerms] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
 
   const handleClearData = () => {
     if (confirm("Are you sure? This will delete all your food logs, flares, and bio-data forever. This cannot be undone.")) {
@@ -15,8 +16,32 @@ export const Settings: React.FC = () => {
     }
   };
 
+  const handleExport = () => {
+    db.exportData();
+  };
+
+  const handleImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsImporting(true);
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      const success = db.importData(content);
+      setIsImporting(false);
+      if (success) {
+        alert("Data imported successfully! The app will now reload.");
+        window.location.reload();
+      } else {
+        alert("Invalid backup file. Please ensure you selected a FlareFinder JSON file.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
   return (
-    <div className="space-y-6 pb-20 animate-in fade-in duration-300">
+    <div className="space-y-6 pb-24 animate-in fade-in duration-300">
       <div className="flex items-center justify-between">
         <h2 className="text-2xl font-black text-slate-800">Account & Safety</h2>
       </div>
@@ -29,6 +54,51 @@ export const Settings: React.FC = () => {
         <div>
           <h3 className="font-bold text-slate-800 text-lg">{user?.name}</h3>
           <p className="text-sm text-slate-400 font-medium">{user?.condition} • {user?.conditionSeverity}</p>
+        </div>
+      </div>
+
+      {/* Data Portability - HIGHLIGHTED SECTION */}
+      <div className="space-y-3">
+        <h4 className="text-[10px] font-black text-teal-600 uppercase tracking-widest px-1 flex items-center gap-2">
+            <Database className="w-3 h-3" /> Data Portability & Backups
+        </h4>
+        
+        <div className="bg-white p-6 rounded-[2rem] border-2 border-teal-50 shadow-xl shadow-teal-900/5 space-y-6">
+          <div className="flex items-start gap-4">
+            <div className="bg-teal-100 p-3 rounded-2xl">
+                <RefreshCw className="w-6 h-6 text-teal-600" />
+            </div>
+            <div>
+              <p className="text-sm font-black text-slate-800">Updating the App</p>
+              <p className="text-xs text-slate-500 leading-relaxed mt-1">To get the latest code updates, simply <strong>Refresh</strong> this page in your browser. Your data is stored safely on your device and is not lost during updates.</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <button 
+              onClick={handleExport}
+              className="flex flex-col items-center justify-center gap-3 p-5 bg-indigo-50 border border-indigo-100 rounded-2xl hover:bg-indigo-100 transition-all group shadow-sm"
+            >
+              <div className="bg-white p-2.5 rounded-xl shadow-sm group-hover:scale-110 transition-transform">
+                <Download className="w-6 h-6 text-indigo-600" />
+              </div>
+              <span className="text-[10px] font-black uppercase text-indigo-700 tracking-wider">Export Backup</span>
+            </button>
+            
+            <label className="flex flex-col items-center justify-center gap-3 p-5 bg-teal-50 border border-teal-100 rounded-2xl hover:bg-teal-100 transition-all group cursor-pointer shadow-sm">
+              <input type="file" accept=".json" className="hidden" onChange={handleImport} disabled={isImporting} />
+              <div className="bg-white p-2.5 rounded-xl shadow-sm group-hover:scale-110 transition-transform">
+                <Upload className={`w-6 h-6 text-teal-600 ${isImporting ? 'animate-bounce' : ''}`} />
+              </div>
+              <span className="text-[10px] font-black uppercase text-teal-700 tracking-wider">Import Data</span>
+            </label>
+          </div>
+          
+          <div className="bg-slate-50 p-3 rounded-xl">
+            <p className="text-[10px] text-center text-slate-500 font-medium leading-normal italic">
+              "Data is stored in your browser's local memory. Use these tools to move your bio-history to a new phone or browser."
+            </p>
+          </div>
         </div>
       </div>
 

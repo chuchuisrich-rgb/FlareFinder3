@@ -349,47 +349,50 @@ export const parseLabResults = async (
       
       Return ONLY valid JSON using the exact keys above.`;
 
-      const response = await ai.models.generateContent({
-          model: FLASH_MODEL, 
-          contents: prompt,
-          config: {
-              responseMimeType: "application/json",
-              thinkingConfig: { thinkingBudget: 2048 },
-              responseSchema: {
-                  type: Type.OBJECT,
-                  properties: {
-                      sensitivities: {
-                          type: Type.ARRAY,
-                          items: {
-                              type: Type.OBJECT,
-                              properties: {
-                                  food: { type: Type.STRING },
-                                  level: { type: Type.STRING, enum: ['high', 'medium', 'low'] },
-                                  category: { type: Type.STRING }
-                              },
-                              required: ["food", "level"]
-                          }
+      // Use smartExecute to try PRO first for high precision on clinical reports
+      return await smartExecute(PRO_MODEL, async (model) => {
+          const response = await ai.models.generateContent({
+              model: model, 
+              contents: prompt,
+              config: {
+                  responseMimeType: "application/json",
+                  thinkingConfig: { thinkingBudget: 2048 },
+                  responseSchema: {
+                      type: Type.OBJECT,
+                      properties: {
+                          sensitivities: {
+                              type: Type.ARRAY,
+                              items: {
+                                  type: Type.OBJECT,
+                                  properties: {
+                                      food: { type: Type.STRING },
+                                      level: { type: Type.STRING, enum: ['high', 'medium', 'low'] },
+                                      category: { type: Type.STRING }
+                                  },
+                                  required: ["food", "level"]
+                              }
+                          },
+                          biomarkers: {
+                              type: Type.ARRAY,
+                              items: {
+                                  type: Type.OBJECT,
+                                  properties: {
+                                      name: { type: Type.STRING },
+                                      value: { type: Type.NUMBER },
+                                      unit: { type: Type.STRING },
+                                      status: { type: Type.STRING, enum: ['normal', 'high', 'low'] }
+                                  },
+                                  required: ["name", "value", "unit"]
+                              }
+                          },
+                          summary: { type: Type.STRING }
                       },
-                      biomarkers: {
-                          type: Type.ARRAY,
-                          items: {
-                              type: Type.OBJECT,
-                              properties: {
-                                  name: { type: Type.STRING },
-                                  value: { type: Type.NUMBER },
-                                  unit: { type: Type.STRING },
-                                  status: { type: Type.STRING, enum: ['normal', 'high', 'low'] }
-                              },
-                              required: ["name", "value", "unit"]
-                          }
-                      },
-                      summary: { type: Type.STRING }
-                  },
-                  required: ["summary"]
+                      required: ["summary"]
+                  }
               }
-          }
+          });
+          return safeJsonParse(response.text);
       });
-      return safeJsonParse(response.text);
   };
 
   let allSensitivities: FoodSensitivity[] = [];

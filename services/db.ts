@@ -21,7 +21,6 @@ export const db = {
       return stored ? JSON.parse(stored) : initialDb;
     } catch (e) {
       console.error("Failed to load DB - possibly corrupt or quota exceeded. Resetting.", e);
-      // If we can't parse, we must reset or the app will never load.
       try {
           localStorage.removeItem(STORAGE_KEY);
       } catch(resetErr) {
@@ -56,8 +55,6 @@ export const db = {
         const existingSensitivities = state.user.foodSensitivities || [];
         const existingMap = new Map(existingSensitivities.map(s => [s.food.toLowerCase(), s]));
         
-        // Merge: Add new ones or update existing if source is lab_result (higher authority than manual?)
-        // For simplicity, we assume new lab results overwrite or add.
         sensitivities.forEach(s => {
             existingMap.set(s.food.toLowerCase(), s);
         });
@@ -76,12 +73,9 @@ export const db = {
       const state = db.getState();
       if (state.user) {
           state.user.labReports = [...(state.user.labReports || []), report];
-          
-          // Also extract and save biomarkers globally for easier charting
           if (report.extractedBiomarkers) {
              state.biomarkers = [...(state.biomarkers || []), ...report.extractedBiomarkers];
           }
-          
           db.saveState(state);
       }
   },
@@ -138,7 +132,6 @@ export const db = {
       db.saveState(state);
   },
 
-  // Shopping List
   addToShoppingList: (item: ShoppingListItem) => {
     const state = db.getState();
     state.shoppingList = [item, ...(state.shoppingList || [])];
@@ -166,6 +159,32 @@ export const db = {
       const state = db.getState();
       state.biomarkers = [...(state.biomarkers || []), ...biomarkers];
       db.saveState(state);
+  },
+
+  exportData: () => {
+    const state = db.getState();
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `flarefinder_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
+  importData: (jsonData: string): boolean => {
+    try {
+      const parsed = JSON.parse(jsonData);
+      // Basic validation: check for user or at least one known array
+      if (parsed && (parsed.user || Array.isArray(parsed.foodLogs))) {
+        db.saveState(parsed);
+        return true;
+      }
+      return false;
+    } catch (e) {
+      console.error("Import failed", e);
+      return false;
+    }
   },
 
   clear: () => {
