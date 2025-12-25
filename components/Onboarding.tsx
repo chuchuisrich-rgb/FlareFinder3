@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { db } from '../services/db';
 import { UserProfile } from '../types';
-import { ChevronRight, ShieldAlert, Check, AlertTriangle, Info, Scale } from 'lucide-react';
+import { ChevronRight, ShieldAlert, Check, AlertTriangle, Info, Scale, ShieldCheck } from 'lucide-react';
 
 interface OnboardingProps {
   onComplete: () => void;
@@ -97,6 +97,13 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                     </h4>
                     <p>By proceeding, you agree that you are solely responsible for any lifestyle changes you make. The developers are not liable for any adverse health events.</p>
                 </section>
+
+                <section>
+                    <h4 className="font-black text-slate-800 uppercase text-[10px] mb-1 flex items-center gap-1">
+                        <ShieldCheck className="w-3 h-3" /> 5. Data Sovereignty & Privacy
+                    </h4>
+                    <p>Your privacy is absolute. All logs, photos, and clinical results are stored locally on this device. We do not have a central database. <strong>Important:</strong> Clearing your browser cache or clicking the "Purge" button in Settings will permanently delete all your data. Data is only transmitted to secure AI models temporarily when you request specific insights or analysis.</p>
+                </section>
             </div>
             
             <button 
@@ -108,7 +115,7 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
                 <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center ${acceptedTerms ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200'}`}>
                     {acceptedTerms && <Check className="w-4 h-4" />}
                 </div>
-                <span className="font-bold text-sm text-left leading-tight">I understand and accept all medical disclaimers and limitations.</span>
+                <span className="font-bold text-sm text-left leading-tight">I understand the medical limitations and that my data is stored locally.</span>
             </button>
 
             <button 
