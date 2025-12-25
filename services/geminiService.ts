@@ -19,22 +19,22 @@ const getAiClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
+/**
+ * Executes a task with a preferred model, falling back to a secondary model on ANY failure.
+ */
 async function smartExecute<T>(
     preferredModel: string, 
     task: (model: string) => Promise<T>
 ): Promise<T> {
     try {
-        return await withRetry(() => task(preferredModel));
+        // Try the preferred model (Pro) with minimal retries to avoid long hangs
+        return await withRetry(() => task(preferredModel), 1);
     } catch (err: any) {
-        const status = err?.status || err?.error?.status;
-        const message = err?.message || "";
-        const isQuotaError = status === 'RESOURCE_EXHAUSTED' || status === 429 || 
-                           message.toLowerCase().includes("quota") || 
-                           message.toLowerCase().includes("limit");
-
-        if (isQuotaError && preferredModel === PRO_MODEL) {
-            console.warn("Pro model limited. Switching to Flash.");
-            return await withRetry(() => task(FLASH_MODEL));
+        // If the preferred model fails (Pro), instantly switch to Flash
+        if (preferredModel === PRO_MODEL) {
+            console.warn(`[Neural Engine] Pro Model unavailable or returned invalid data. Fallback to Flash.`, err);
+            // Flash is tried with standard retries for maximum reliability
+            return await withRetry(() => task(FLASH_MODEL), 2);
         }
         throw err;
     }
@@ -48,8 +48,9 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
     } catch (err: any) {
       lastError = err;
       const status = err?.status || err?.error?.status;
+      // Retry on network errors or transient server errors
       if (status === 500 || status === 503 || (status === 429 && i < maxRetries - 1)) {
-        const waitTime = Math.pow(2, i) * 2000 + (Math.random() * 1000); 
+        const waitTime = Math.pow(2, i) * 1500 + (Math.random() * 500); 
         await new Promise(resolve => setTimeout(resolve, waitTime));
         continue;
       }
@@ -158,7 +159,9 @@ export const analyzeFoodImage = async (base64Image: string, mimeType: string = "
             }
         }
     });
-    return safeJsonParse(response.text) || { detectedItems: [] };
+    const result = safeJsonParse(response.text);
+    if (!result) throw new Error("Invalid Analysis JSON");
+    return result;
   });
 };
 
@@ -172,7 +175,9 @@ export const scanGroceryProduct = async (base64Image: string, mimeType: string =
         contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Examine this grocery label for inflammatory triggers related to ${user?.condition}. Highlight additives like Maltodextrin, Carrageenan, or Nightshade derivatives.` }] },
         config: { responseMimeType: "application/json" }
     });
-    return { ...safeJsonParse(response.text), isGroceryScan: true };
+    const result = safeJsonParse(response.text);
+    if (!result) throw new Error("Invalid Scan JSON");
+    return { ...result, isGroceryScan: true };
   });
 };
 
@@ -197,14 +202,19 @@ export const generatePatternInsights = async (state: AppState): Promise<DeepAnal
   return smartExecute(PRO_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: `Analyze trends for ${state.user?.condition}. ${goalContext} Logs: ${JSON.stringify(state.flareLogs.slice(0, 10))}. Return DeepAnalysis JSON.`,
+        contents: `Analyze patterns for ${state.user?.condition}. ${goalContext} 
+        Food Logs: ${JSON.stringify(state.foodLogs.slice(0, 15))}
+        Flare Logs: ${JSON.stringify(state.flareLogs.slice(0, 10))}
+        Behavior Logs: ${JSON.stringify(state.behaviorLogs.slice(0, 20))}
+        Return DeepAnalysis JSON.`,
         config: { 
             responseMimeType: "application/json",
             thinkingConfig: { thinkingBudget: 2048 } 
         }
     });
     const analysis = safeJsonParse(response.text);
-    return analysis ? { ...analysis, id: crypto.randomUUID(), timestamp: new Date().toISOString() } : null;
+    if (!analysis) throw new Error("Invalid Forecast JSON");
+    return { ...analysis, id: crypto.randomUUID(), timestamp: new Date().toISOString() };
   });
 };
 
@@ -212,12 +222,22 @@ export const chatWithCoach = async (message: string, state: AppState): Promise<{
   const ai = getAiClient();
   if (!ai) return { reply: "AI Offline.", suggestions: [] };
 
-  const response = await ai.models.generateContent({
-      model: FLASH_MODEL,
-      contents: `Neural Coach. Condition: ${state.user?.condition}. Message: ${message}`,
-      config: { responseMimeType: "application/json" }
+  return smartExecute(PRO_MODEL, async (model) => {
+      const response = await ai.models.generateContent({
+          model: model,
+          contents: `Neural Coach. Condition: ${state.user?.condition}. 
+          History Snippet: ${JSON.stringify(state.flareLogs.slice(0, 3))}
+          Message: ${message}. 
+          Return JSON { "reply": "...", "suggestions": [...], "richContent": {...} }.`,
+          config: { 
+              responseMimeType: "application/json",
+              thinkingConfig: { thinkingBudget: 1024 } 
+          }
+      });
+      const result = safeJsonParse(response.text);
+      if (!result) throw new Error("Invalid Coach JSON");
+      return result;
   });
-  return safeJsonParse(response.text) || { reply: "I'm processing...", suggestions: [] };
 };
 
 export const getSmartReminders = async (state: AppState): Promise<Reminder[]> => {
@@ -288,7 +308,9 @@ export const simulateMealImpact = async (base64Image: string, mimeType: string =
         contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Simulate impact for ${user.condition}.` }] },
         config: { responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 1024 } }
     });
-    return safeJsonParse(response.text);
+    const result = safeJsonParse(response.text);
+    if (!result) throw new Error("Invalid Simulation JSON");
+    return result;
   });
 };
 
@@ -302,7 +324,9 @@ export const analyzeRestaurantMenu = async (base64Image: string, mimeType: strin
             contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Menu Scan for ${user.condition}.` }] },
             config: { responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 2048 } }
         });
-        return safeJsonParse(response.text);
+        const result = safeJsonParse(response.text);
+        if (!result) throw new Error("Invalid Menu JSON");
+        return result;
     });
 };
 
@@ -349,7 +373,6 @@ export const parseLabResults = async (
       
       Return ONLY valid JSON using the exact keys above.`;
 
-      // Use smartExecute to try PRO first for high precision on clinical reports
       return await smartExecute(PRO_MODEL, async (model) => {
           const response = await ai.models.generateContent({
               model: model, 
@@ -391,7 +414,9 @@ export const parseLabResults = async (
                   }
               }
           });
-          return safeJsonParse(response.text);
+          const result = safeJsonParse(response.text);
+          if (!result) throw new Error("Invalid Lab JSON");
+          return result;
       });
   };
 
@@ -434,10 +459,15 @@ export const runFlareDetective = async (state: AppState): Promise<FlareDetective
     return smartExecute(PRO_MODEL, async (model) => {
         const response = await ai.models.generateContent({
             model: model,
-            contents: `Investigate flare for ${state.user?.condition}. Logs: ${JSON.stringify(state.foodLogs.slice(0, 5))}. JSON.`,
+            contents: `Flare Detective Analysis for ${state.user?.condition}. 
+            Recent Food Logs: ${JSON.stringify(state.foodLogs.slice(0, 10))}
+            Recent Flare Logs: ${JSON.stringify(state.flareLogs.slice(0, 5))}
+            Recent Behaviors: ${JSON.stringify(state.behaviorLogs.slice(0, 10))}
+            Identify the most likely trigger suspects. JSON.`,
             config: { responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 2048 } }
         });
         const report = safeJsonParse(response.text);
+        if (!report) throw new Error("Invalid Detective JSON");
         return { ...report, id: crypto.randomUUID(), dateGenerated: new Date().toISOString() };
     });
 };
@@ -446,10 +476,17 @@ export const generateSafeMealPlan = async (user: UserProfile): Promise<DayPlan> 
     const ai = getAiClient();
     if (!ai) throw new Error("AI Offline");
 
-    const response = await ai.models.generateContent({
-        model: FLASH_MODEL,
-        contents: `Safe meal plan for ${user.condition}. JSON.`,
-        config: { responseMimeType: "application/json", thinkingConfig: { thinkingBudget: 1024 } }
+    return smartExecute(PRO_MODEL, async (model) => {
+        const response = await ai.models.generateContent({
+            model: model,
+            contents: `Generate a safe meal plan for a user with ${user.condition}. Focus on high-nutrient, anti-inflammatory options. Return JSON { "breakfast": {...}, "lunch": {...}, "dinner": {...}, "snack": {...} }.`,
+            config: { 
+                responseMimeType: "application/json", 
+                thinkingConfig: { thinkingBudget: 1024 } 
+            }
+        });
+        const result = safeJsonParse(response.text);
+        if (!result) throw new Error("Invalid Meal Plan JSON");
+        return result;
     });
-    return safeJsonParse(response.text);
 };
