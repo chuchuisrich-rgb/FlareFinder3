@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { db } from '../services/db';
 import { generatePatternInsights, getSmartReminders, runFlareDetective } from '../services/geminiService';
 import { AppState, Reminder, DeepAnalysis, FlareDetectiveReport } from '../types';
-import { Sparkles, TrendingUp, TrendingDown, Activity, Bell, Clock, Beaker, Shield, AlertOctagon, RefreshCw, CheckCircle2, Flame, X, ArrowRight, ScanLine, Search, Camera, ScanBarcode, Microscope, CalendarHeart, Loader2, Layers, AlertTriangle, Plus, CloudSun, Utensils, Smile, Heart, Sunrise, CloudRain, Sun, HelpCircle, MessageCircle, Zap } from 'lucide-react';
+import { Sparkles, TrendingUp, TrendingDown, Activity, Bell, Clock, Beaker, Shield, AlertOctagon, RefreshCw, CheckCircle2, Flame, X, ArrowRight, ScanLine, Search, Camera, ScanBarcode, Microscope, CalendarHeart, Loader2, Layers, AlertTriangle, Plus, CloudSun, Utensils, Smile, Heart, Sunrise, CloudRain, Sun, HelpCircle, MessageCircle, Zap, ShieldAlert, Info, ShoppingBag } from 'lucide-react';
 import {
   AreaChart,
   Area,
@@ -62,16 +62,12 @@ export const Dashboard: React.FC = () => {
     const stats: Record<string, { exposures: number; flares: number }> = {};
     const WINDOW = 48 * 60 * 60 * 1000; // 48 hours lookback window
 
-    // Pre-fill common categories to ensure map isn't empty for new users
     ['Dairy', 'Nightshade', 'Gluten', 'Sugar', 'Processed', 'Alcohol'].forEach(k => {
         stats[k] = { exposures: 0, flares: 0 };
     });
 
-    // Analyze history
     state.foodLogs.forEach(foodLog => {
         const foodTime = new Date(foodLog.timestamp).getTime();
-        
-        // Check if a flare occurred within 48h AFTER this meal
         const relevantFlare = state.flareLogs.find(f => {
             const fTime = new Date(f.timestamp).getTime();
             return fTime > foodTime && fTime < (foodTime + WINDOW) && f.severity >= 2;
@@ -93,7 +89,7 @@ export const Dashboard: React.FC = () => {
             probability: data.exposures > 0 ? Math.round((data.flares / data.exposures) * 100) : 0,
             volume: data.exposures
         }))
-        .filter(item => item.volume > 0) // Only show items present in logs
+        .filter(item => item.volume > 0) 
         .sort((a, b) => b.probability - a.probability);
 
     setTriggerMap(mapData);
@@ -147,7 +143,7 @@ export const Dashboard: React.FC = () => {
 
     let currentStreak = 0;
     if (state.foodLogs.length > 0 || state.flareLogs.length > 0) {
-      currentStreak = 3; 
+      currentStreak = Math.min(3, state.foodLogs.length + state.flareLogs.length); 
     }
     setStreakDays(currentStreak);
   };
@@ -197,7 +193,6 @@ export const Dashboard: React.FC = () => {
 
   return (
     <div className="space-y-6 pb-20">
-       {/* Greeting Narrative */}
        <div className="flex justify-between items-start">
           <div className="flex-1 pr-4">
               <h1 className="text-xl font-bold text-slate-800">
@@ -214,10 +209,15 @@ export const Dashboard: React.FC = () => {
           </div>
        </div>
 
-       {/* BIO-RHYTHM COMMAND CENTER */}
+       <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl flex items-start gap-3">
+          <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+          <p className="text-[10px] text-amber-800 font-bold leading-tight uppercase tracking-tight">
+            NOT MEDICAL ADVICE: FlareFinder AI is for educational tracking. AI insights are experimental. Verify all data with your physician.
+          </p>
+       </div>
+
        {analysis?.bioWeather && (
          <div className="animate-in fade-in slide-in-from-top-4 duration-500">
-           {/* Weather Card */}
            <div className={`rounded-3xl p-6 shadow-xl mb-6 relative overflow-hidden ${
                analysis.bioWeather.status === 'Sunny' ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-orange-200' :
                analysis.bioWeather.status === 'Stormy' ? 'bg-gradient-to-br from-slate-700 to-slate-900 text-white shadow-slate-300' :
@@ -236,7 +236,6 @@ export const Dashboard: React.FC = () => {
               <p className="mt-4 text-sm opacity-80 border-t border-white/20 pt-3">{analysis.bioWeather.summary}</p>
            </div>
            
-           {/* Daily Protocol Grid */}
            {analysis.dailyProtocol && (
                <div className="grid grid-cols-2 gap-3 mb-6">
                    <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
@@ -272,52 +271,19 @@ export const Dashboard: React.FC = () => {
          </div>
        )}
 
-       {/* Trigger Probability Map (NEW FEATURE) */}
-       <div className="space-y-3">
-            <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wide flex items-center gap-2">
-               <Zap className="w-4 h-4 text-amber-500" /> Trigger Probability Map
-            </h3>
-            
-            {triggerMap.length === 0 ? (
-               <div className="bg-white p-6 rounded-2xl border border-dashed border-slate-200 text-center">
-                   <p className="text-slate-500 text-sm mb-1">No trigger patterns detected yet.</p>
-                   <p className="text-xs text-slate-400">Log more meals and flares to build your probability map.</p>
-               </div>
-            ) : (
-                <div className="grid grid-cols-2 gap-3">
-                {triggerMap.map(item => (
-                    <div key={item.name} className={`p-4 rounded-2xl border flex flex-col items-center text-center transition-all ${
-                        item.probability > 75 ? 'bg-rose-50 border-rose-200' :
-                        item.probability > 40 ? 'bg-orange-50 border-orange-200' :
-                        'bg-white border-slate-100'
-                    }`}>
-                        <span className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">{item.name}</span>
-                        <div className="flex items-baseline justify-center gap-1 mb-2">
-                            <span className={`text-3xl font-black ${
-                                item.probability > 75 ? 'text-rose-600' :
-                                item.probability > 40 ? 'text-orange-600' :
-                                'text-emerald-600'
-                            }`}>{item.probability}%</span>
-                        </div>
-                        <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden mb-2">
-                            <div className={`h-full rounded-full ${
-                                item.probability > 75 ? 'bg-rose-500' :
-                                item.probability > 40 ? 'bg-orange-500' :
-                                'bg-emerald-500'
-                            }`} style={{width: `${item.probability}%`}} />
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-medium">{item.volume} logs analyzed</span>
-                    </div>
-                ))}
-                </div>
-            )}
+       <div className="grid grid-cols-2 gap-4">
+          <button onClick={() => setShowLabs(true)} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center gap-2 hover:border-indigo-200 transition-all">
+              <div className="bg-indigo-50 p-3 rounded-xl"><Microscope className="w-6 h-6 text-indigo-600" /></div>
+              <span className="font-bold text-slate-700 text-xs uppercase tracking-tight">Lab Vault</span>
+          </button>
+          <button onClick={() => window.location.hash = 'shop'} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex flex-col items-center gap-2 hover:border-teal-200 transition-all">
+              <div className="bg-teal-50 p-3 rounded-xl"><ShoppingBag className="w-6 h-6 text-teal-600" /></div>
+              <span className="font-bold text-slate-700 text-xs uppercase tracking-tight">Shop Triggers</span>
+          </button>
        </div>
 
-       {/* Wellness Score Card */}
        <div className="bg-slate-900 rounded-3xl p-6 text-white shadow-xl shadow-slate-300 relative overflow-hidden">
            <div className="absolute top-0 right-0 w-64 h-64 bg-teal-500/20 rounded-full blur-3xl -mr-16 -mt-16" />
-           <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/20 rounded-full blur-3xl -ml-10 -mb-10" />
-           
            <div className="relative z-10">
                <div className="flex justify-between items-start mb-6">
                    <div>
@@ -325,12 +291,6 @@ export const Dashboard: React.FC = () => {
                            <h2 className="text-slate-300 text-sm font-medium uppercase tracking-wider">Inflammation Score</h2>
                            <button onClick={() => setShowScoreInfo(!showScoreInfo)} className="text-slate-400 hover:text-white"><HelpCircle className="w-4 h-4" /></button>
                        </div>
-                       {showScoreInfo && (
-                           <div className="mb-3 bg-white/10 backdrop-blur-md p-3 rounded-xl border border-white/20 text-xs text-slate-200">
-                               <p className="mb-1"><strong>0 = No Inflammation</strong></p>
-                               <p className="mb-1"><strong>100 = Severe Inflammation</strong></p>
-                           </div>
-                       )}
                        <div className="flex items-baseline gap-2">
                            <span className="text-5xl font-bold text-white">{currentScore}</span>
                            {hasSufficientData && <span className="text-slate-400 font-medium">/100</span>}
@@ -351,26 +311,25 @@ export const Dashboard: React.FC = () => {
                                        <stop offset="95%" stopColor="#2dd4bf" stopOpacity={0}/>
                                    </linearGradient>
                                </defs>
-                               <Tooltip contentStyle={{backgroundColor: '#1e293b', border: 'none', borderRadius: '8px'}} itemStyle={{color: '#2dd4bf', fontWeight: 'bold'}} labelStyle={{color: '#94a3b8'}} />
                                <Area type="monotone" dataKey="score" stroke="#2dd4bf" strokeWidth={3} fillOpacity={1} fill="url(#colorScore)" />
                            </AreaChart>
                        </ResponsiveContainer>
                    ) : (
                        <div className="h-full flex flex-col items-center justify-center text-slate-500 border border-dashed border-slate-700 rounded-xl">
                            <Activity className="w-6 h-6 mb-2 opacity-50" />
-                           <p className="text-xs">Log a flare to see trends</p>
+                           <p className="text-xs">Log more data to see trends</p>
                        </div>
                    )}
                </div>
                
-               <div className="flex gap-3 mt-2">
+               <div className="flex gap-3 mt-4">
                   <button 
                      onClick={handleGenerateInsights}
                      disabled={loadingInsights}
                      className="flex-1 bg-white text-slate-900 py-3 rounded-xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-slate-100 transition-colors"
                   >
                       {loadingInsights ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-purple-600" />}
-                      {loadingInsights ? "Scanning..." : "Update Forecast"}
+                      Update Forecast
                   </button>
                   <button 
                      onClick={handleRunDetective}
@@ -384,11 +343,10 @@ export const Dashboard: React.FC = () => {
            </div>
        </div>
 
-       {/* Smart Reminders */}
        {reminders.length > 0 && (
            <div className="space-y-3">
                <h3 className="font-bold text-slate-800 text-sm uppercase tracking-wide flex items-center gap-2">
-                   <Bell className="w-4 h-4 text-indigo-500" /> Smart Reminders
+                   <Bell className="w-4 h-4 text-indigo-500" /> AI Smart Reminders
                </h3>
                {reminders.map(rem => (
                    <div key={rem.id} className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100 flex items-start gap-3">
@@ -401,78 +359,6 @@ export const Dashboard: React.FC = () => {
                        </div>
                    </div>
                ))}
-           </div>
-       )}
-       
-       {/* Quick Actions */}
-       <button onClick={() => setShowLabs(true)} className="w-full bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between gap-3 hover:border-indigo-200 transition-all group">
-           <div className="flex items-center gap-4">
-               <div className="bg-indigo-50 p-3 rounded-full group-hover:scale-110 transition-transform"><Microscope className="w-6 h-6 text-indigo-600" /></div>
-               <div className="text-left">
-                  <span className="font-bold text-slate-700 text-sm block">Lab Vault</span>
-                  <span className="text-xs text-slate-400">Manage reports & sensitivities</span>
-               </div>
-           </div>
-           <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-indigo-500 transition-colors" />
-       </button>
-
-       {/* Analysis Result */}
-       {analysis && (
-           <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100 space-y-6">
-               <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-                   <h3 className="font-bold text-slate-800 flex items-center gap-2"><Sparkles className="w-5 h-5 text-purple-500" /> Daily Bio-Twin</h3>
-                   <span className="text-xs text-slate-400">{new Date(analysis.timestamp).toLocaleDateString()}</span>
-               </div>
-               
-               {analysis.cycleAnalysis && analysis.cycleAnalysis.currentPhase !== 'Unknown' && (
-                   <div className="bg-gradient-to-r from-pink-50 to-rose-50 p-4 rounded-2xl border border-pink-100">
-                        <div className="flex justify-between items-start mb-2">
-                            <h4 className="font-bold text-rose-800 flex items-center gap-2 text-sm"><CalendarHeart className="w-4 h-4 text-rose-500" /> Hormonal Forecast</h4>
-                            <span className="text-[10px] bg-white px-2 py-0.5 rounded-full text-rose-600 font-bold uppercase tracking-wide">{analysis.cycleAnalysis.currentPhase} Phase</span>
-                        </div>
-                        <p className="text-xs text-rose-700 mb-2 font-medium">{analysis.cycleAnalysis.hormonalContext}</p>
-                        <p className="text-xs text-slate-600">{analysis.cycleAnalysis.specificAdvice}</p>
-                   </div>
-               )}
-               
-               {analysis.stackingTriggers && analysis.stackingTriggers.length > 0 && (
-                   <div className="space-y-3">
-                       <h4 className="font-bold text-slate-700 text-sm uppercase tracking-wide flex items-center gap-2"><Layers className="w-4 h-4 text-orange-500" /> Stacking Triggers Detected</h4>
-                       {analysis.stackingTriggers.map((stack, i) => (
-                           <div key={i} className="flex items-center gap-2 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                               <div className="bg-white px-2 py-1 rounded-md text-xs font-bold text-slate-600 border border-slate-200 shadow-sm">{stack.triggerA}</div>
-                               <Plus className="w-3 h-3 text-slate-400" />
-                               <div className="bg-white px-2 py-1 rounded-md text-xs font-bold text-slate-600 border border-slate-200 shadow-sm">{stack.triggerB}</div>
-                               <ArrowRight className="w-4 h-4 text-rose-500" />
-                               <div className="flex-1 text-xs text-rose-600 font-bold text-right leading-tight">{stack.combinedEffect}</div>
-                           </div>
-                       ))}
-                   </div>
-               )}
-
-               <div className="h-48 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                        <RadarChart cx="50%" cy="50%" outerRadius="80%" data={radarData}>
-                        <PolarGrid stroke="#e2e8f0" />
-                        <PolarAngleAxis dataKey="subject" tick={{ fill: '#64748b', fontSize: 10, fontWeight: 'bold' }} />
-                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
-                        <Radar name="User" dataKey="A" stroke="#6366f1" strokeWidth={2} fill="#6366f1" fillOpacity={0.3} />
-                        </RadarChart>
-                    </ResponsiveContainer>
-               </div>
-           </div>
-       )}
-       
-       {detectiveReport && (
-           <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-100">
-               <div className="flex items-center gap-3 mb-4">
-                   <div className="bg-amber-100 p-2 rounded-lg"><Search className="w-5 h-5 text-amber-600" /></div>
-                   <h3 className="font-bold text-slate-800">Flare Detective Report</h3>
-               </div>
-               <div className="bg-amber-50 p-4 rounded-xl border border-amber-100 mb-4">
-                   <h4 className="font-bold text-amber-800 text-sm mb-1">Conclusion</h4>
-                   <p className="text-sm text-amber-700 leading-relaxed">{detectiveReport.conclusion}</p>
-               </div>
            </div>
        )}
        

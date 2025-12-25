@@ -9,6 +9,7 @@ import { DailyTracker } from './components/DailyTracker';
 import { Onboarding } from './components/Onboarding';
 import { AICoach } from './components/AICoach';
 import { Marketplace } from './components/Marketplace';
+import { Settings } from './components/Settings';
 
 export default function App() {
   const [initialized, setInitialized] = useState(false);
@@ -43,6 +44,8 @@ export default function App() {
         return <FlareLogger />;
       case 'daily':
         return <DailyTracker />;
+      case 'settings':
+        return <Settings />;
       default:
         return <Dashboard />;
     }

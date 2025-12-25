@@ -2,7 +2,7 @@
 import React, { useState, useRef } from 'react';
 import { db } from '../services/db';
 import { FlareLog } from '../types';
-import { Flame, MapPin, Frown, Save, X, Plus, Pencil, RotateCcw, CloudSun, Loader2 } from 'lucide-react';
+import { Flame, MapPin, Frown, Save, X, Plus, Pencil, RotateCcw, CloudSun, Loader2, ShieldAlert, PhoneCall, ExternalLink } from 'lucide-react';
 
 export const FlareLogger: React.FC = () => {
   const [severity, setSeverity] = useState(0);
@@ -99,7 +99,6 @@ export const FlareLogger: React.FC = () => {
     }
   };
 
-  // Helper to convert path points to SVG path data
   const pointsToPath = (pts: {x: number, y: number}[]) => {
     if (pts.length === 0) return '';
     const start = pts[0];
@@ -120,7 +119,6 @@ export const FlareLogger: React.FC = () => {
         navigator.geolocation.getCurrentPosition(async (position) => {
             try {
                 const { latitude, longitude } = position.coords;
-                // Fetch from Open-Meteo (free public weather API)
                 const response = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,relative_humidity_2m&temperature_unit=fahrenheit`);
                 const data = await response.json();
                 
@@ -150,10 +148,7 @@ export const FlareLogger: React.FC = () => {
     }
     
     setIsSaving(true);
-    
-    // Fetch weather data
     const weather = await fetchWeatherData();
-    
     const finalLocations = [...selectedLocations];
     const locationString = finalLocations.join(', ');
 
@@ -183,7 +178,7 @@ export const FlareLogger: React.FC = () => {
   };
 
   return (
-    <div className="space-y-6 pb-20">
+    <div className="space-y-6 pb-20 animate-in fade-in duration-300">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-bold text-slate-800">Log Flare-up</h2>
         <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
@@ -191,11 +186,43 @@ export const FlareLogger: React.FC = () => {
             <span>Auto-Weather</span>
         </div>
       </div>
+
+      {/* EMERGENCY RED LINE LOGIC */}
+      {severity === 5 && (
+          <div className="bg-rose-600 text-white p-5 rounded-3xl shadow-2xl shadow-rose-200 border-4 border-rose-500 animate-pulse">
+              <div className="flex items-start gap-4 mb-4">
+                  <div className="bg-white/20 p-3 rounded-2xl backdrop-blur-md">
+                      <ShieldAlert className="w-8 h-8 text-white" />
+                  </div>
+                  <div>
+                      <h3 className="text-xl font-black uppercase tracking-tight">Emergency Warning</h3>
+                      <p className="text-sm font-bold opacity-90 leading-tight">Severity 5 requires immediate professional evaluation.</p>
+                  </div>
+              </div>
+              <p className="text-xs font-medium mb-5 bg-black/10 p-3 rounded-xl border border-white/10">
+                  If you have a fever, chills, spreading redness, or extreme pain, do not log this in the app. Please seek medical attention immediately.
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                  <a 
+                    href="tel:911" 
+                    className="flex items-center justify-center gap-2 bg-white text-rose-600 py-3 rounded-xl font-black text-sm uppercase"
+                  >
+                      <PhoneCall className="w-4 h-4" /> Call 911
+                  </a>
+                  <button 
+                    onClick={() => window.open('https://www.google.com/maps/search/emergency+room+near+me', '_blank')}
+                    className="flex items-center justify-center gap-2 bg-rose-500 text-white border border-white/30 py-3 rounded-xl font-black text-sm uppercase"
+                  >
+                      <ExternalLink className="w-4 h-4" /> Find ER
+                  </button>
+              </div>
+          </div>
+      )}
       
       {/* Severity */}
-      <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
+      <div className={`bg-white p-5 rounded-2xl shadow-sm border transition-all duration-300 ${severity === 5 ? 'border-rose-300 ring-4 ring-rose-50' : 'border-slate-100'}`}>
         <div className="flex items-center gap-2 mb-4">
-          <Flame className="w-5 h-5 text-rose-500" />
+          <Flame className={`w-5 h-5 ${severity >= 4 ? 'text-rose-600' : 'text-rose-500'}`} />
           <h3 className="font-semibold text-slate-700">Severity (0-5)</h3>
         </div>
         <div className="flex justify-between gap-2 mb-3">
@@ -205,7 +232,7 @@ export const FlareLogger: React.FC = () => {
               onClick={() => setSeverity(level)}
               className={`flex-1 aspect-square rounded-xl font-bold text-lg transition-all ${
                 severity === level 
-                ? 'bg-rose-500 text-white shadow-lg shadow-rose-200 scale-105' 
+                ? level === 5 ? 'bg-rose-600 text-white shadow-lg shadow-rose-200 scale-105 animate-pulse' : 'bg-rose-500 text-white shadow-lg shadow-rose-200 scale-105' 
                 : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
               }`}
             >
@@ -214,20 +241,21 @@ export const FlareLogger: React.FC = () => {
           ))}
         </div>
         
-        {/* Visual Severity Bar */}
         <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden mb-2">
             <div 
               className={`h-full transition-all duration-500 ease-out ${
                   severity === 0 ? 'w-0' : 
                   severity <= 2 ? 'bg-emerald-400' : 
                   severity <= 4 ? 'bg-orange-400' : 
-                  'bg-rose-600'
+                  'bg-rose-600 animate-pulse'
               }`}
               style={{ width: `${(severity / 5) * 100}%` }}
             />
         </div>
 
-        <p className="text-xs text-center text-slate-400">0 = No Flare, 5 = Emergency</p>
+        <p className="text-xs text-center text-slate-400 font-bold uppercase tracking-widest mt-2">
+            {severity === 5 ? 'STOP: Seek Help' : severity === 0 ? 'Baseline' : 'Flare Active'}
+        </p>
       </div>
 
       {/* Body Map */}
@@ -274,16 +302,13 @@ export const FlareLogger: React.FC = () => {
            onPointerLeave={handlePointerUp}
            onClick={handleMapClick}
         >
-          {/* Base SVG Layer with Silhouette and Paths */}
           <svg viewBox="0 0 100 200" className="absolute inset-0 w-full h-full pointer-events-none">
-            {/* Silhouette */}
             <path 
               d="M50,10 C55,10 60,15 60,22 C60,28 55,30 50,30 C45,30 40,28 40,22 C40,15 45,10 50,10 M50,30 C65,35 80,35 90,40 L90,90 C85,85 75,80 75,80 L75,120 L85,190 L60,190 L55,130 L45,130 L40,190 L15,190 L25,120 L25,80 C25,80 15,85 10,90 L10,40 C20,35 35,35 50,30 Z" 
               fill="#e2e8f0" 
               className="text-slate-200"
             />
             
-            {/* Saved Paths */}
             {paths.map((path, i) => (
               <path 
                 key={i} 
@@ -296,7 +321,6 @@ export const FlareLogger: React.FC = () => {
               />
             ))}
             
-            {/* Current Drawing Path */}
             {currentPath.length > 0 && (
               <path 
                 d={pointsToPath(currentPath)} 
@@ -309,7 +333,6 @@ export const FlareLogger: React.FC = () => {
             )}
           </svg>
           
-          {/* Points Layer (Divs for interactivity) */}
           {bodyPoints.map((p, i) => (
             <div 
               key={i}
@@ -320,16 +343,9 @@ export const FlareLogger: React.FC = () => {
               <div className="w-4 h-4 bg-rose-500 rounded-full border-2 border-white shadow-sm hover:scale-125 transition-transform" />
             </div>
           ))}
-          
-          <div className="absolute bottom-2 left-0 right-0 text-center pointer-events-none">
-            <p className="text-[10px] text-slate-500 font-medium bg-white/60 backdrop-blur-sm py-1 mx-4 rounded-full">
-              {isDrawingMode ? 'Drawing Mode' : 'Tap Mode'}
-            </p>
-          </div>
         </div>
       </div>
 
-      {/* Location Tags */}
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
         <h3 className="font-semibold text-slate-700 mb-3">Location Tags</h3>
         <div className="flex flex-wrap gap-2 mb-4">
@@ -365,7 +381,6 @@ export const FlareLogger: React.FC = () => {
         </div>
       </div>
 
-      {/* Pain Level */}
       <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100">
         <div className="flex items-center gap-2 mb-4">
           <Frown className="w-5 h-5 text-indigo-500" />
@@ -385,7 +400,6 @@ export const FlareLogger: React.FC = () => {
         </div>
       </div>
 
-      {/* Notes */}
       <textarea
         placeholder="Any additional notes? (Stress, specific foods, clothing...)"
         value={notes}

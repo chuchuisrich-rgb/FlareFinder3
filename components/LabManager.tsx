@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect } from 'react';
-import { Upload, FileText, CheckCircle2, AlertTriangle, X, Loader2, Scan, BarChart3, PieChart, Info, Search, FlaskConical, Dna, Activity, ChevronDown, ChevronUp, Plus, TrendingUp, Tag, Save } from 'lucide-react';
+import { Upload, FileText, CheckCircle2, AlertTriangle, X, Loader2, Scan, BarChart3, PieChart, Info, Search, FlaskConical, Dna, Activity, ChevronDown, ChevronUp, Plus, TrendingUp, Tag, Save, HelpCircle } from 'lucide-react';
 import { db } from '../services/db';
 import { parseLabResults } from '../services/geminiService';
 import { FoodSensitivity, AppState, LabReport, Biomarker } from '../types';
@@ -17,11 +17,9 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   const [uploadType, setUploadType] = useState<'food_sensitivity' | 'microbiome' | 'hormonal' | 'bloodwork'>('food_sensitivity');
   const [expandedReportId, setExpandedReportId] = useState<string | null>(null);
   
-  // Manual Input State (Reports)
   const [manualMode, setManualMode] = useState(false);
   const [manualText, setManualText] = useState('');
 
-  // Manual Trigger Entry State
   const [showAddTrigger, setShowAddTrigger] = useState(false);
   const [newTriggerName, setNewTriggerName] = useState('');
   const [newTriggerLevel, setNewTriggerLevel] = useState<'high' | 'medium' | 'low'>('high');
@@ -55,7 +53,7 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
-        setProcessingStatus(`Initializing analysis for ${file.name}...`);
+        setProcessingStatus(`Analyzing ${file.name}...`);
 
         try {
             await new Promise<void>((resolve, reject) => {
@@ -65,7 +63,6 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                     const base64Data = base64Raw.split(',')[1];
                     
                     try {
-                        // Pass a callback to update status granularly (e.g., page 5 of 200)
                         const { sensitivities: newSensitivities, summary, extractedBiomarkers } = await parseLabResults(
                             base64Data, 
                             file.type, 
@@ -73,24 +70,21 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                             (status) => setProcessingStatus(status)
                         );
                         
-                        // Save parsed food sensitivities
                         if (newSensitivities.length > 0) {
                             db.updateUserSensitivities(newSensitivities);
                             totalNewSensitivities += newSensitivities.length;
                         }
 
-                        // Save Biomarkers
                         if (extractedBiomarkers && extractedBiomarkers.length > 0) {
                             db.addBiomarkers(extractedBiomarkers);
                         }
                         
-                        // Save Report Summary
                         const newReport: LabReport = {
                             id: crypto.randomUUID(),
                             type: uploadType,
                             dateUploaded: new Date().toISOString(),
                             summary: summary,
-                            extractedBiomarkers: extractedBiomarkers // Store locally in report too
+                            extractedBiomarkers: extractedBiomarkers
                         };
                         db.addLabReport(newReport);
                         successCount++;
@@ -98,7 +92,6 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                     } catch (err) {
                         console.error(`Error processing file ${file.name}:`, err);
                         failCount++;
-                        // Don't reject, just let the loop continue
                         resolve();
                     }
                 };
@@ -111,20 +104,15 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
         }
     }
 
-    // Refresh local state
-    const updatedState = db.getState();
-    setSensitivities(updatedState.user?.foodSensitivities || []);
-    setReports(updatedState.user?.labReports || []);
-    setBiomarkers(updatedState.biomarkers || []);
-
+    loadData();
     setIsProcessing(false);
     setProcessingStatus('');
     
     if (successCount > 0) {
-        alert(`Batch Complete! Processed ${successCount} files. Archived ${totalNewSensitivities} new data points.${failCount > 0 ? ` (${failCount} files failed)` : ''}`);
+        alert(`Analysis Complete! Processed ${successCount} files. Found ${totalNewSensitivities} clinical data points.`);
         setActiveTab('list');
     } else {
-        alert("Failed to process uploaded files. Please check if the file is a standard PDF or Image.");
+        alert("Failed to extract data. Ensure files are clear clinical reports.");
     }
   };
   
@@ -144,7 +132,7 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           setReports(prev => [newReport, ...prev]);
           setManualText('');
           setManualMode(false);
-          alert("Manual entry saved to reports.");
+          alert("Manual entry saved.");
       } catch (e) {
           console.error(e);
       } finally {
@@ -154,7 +142,6 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
 
   const handleSaveManualTrigger = () => {
       if (!newTriggerName.trim()) return;
-      
       const newSensitivity: FoodSensitivity = {
           food: newTriggerName.trim(),
           level: newTriggerLevel,
@@ -162,18 +149,12 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
           source: 'manual',
           dateDetected: new Date().toISOString()
       };
-      
       db.updateUserSensitivities([newSensitivity]);
-      
-      // Refresh local state
-      const state = db.getState();
-      setSensitivities(state.user?.foodSensitivities || []);
-      
+      loadData();
       setNewTriggerName('');
       setShowAddTrigger(false);
   };
   
-  // Safe Search Logic
   const filteredSensitivities = sensitivities.filter(s => 
       s.food.toLowerCase().includes(searchQuery.toLowerCase())
   );
@@ -182,14 +163,12 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
       if (!searchQuery) return null;
       if (filteredSensitivities.some(s => s.level === 'high')) return 'unsafe';
       if (filteredSensitivities.some(s => s.level === 'medium')) return 'caution';
-      // If found in list but low, or not found (assuming user has uploaded exhaustive list)
       if (filteredSensitivities.length > 0) return 'safe';
       return 'unknown';
   };
   
   const status = getSafeStatus();
 
-  // Helper for List View Grouping
   const renderGroup = (level: 'high' | 'medium' | 'low', title: string, colorClass: string, icon: React.ReactNode) => {
     const items = sensitivities.filter(s => s.level === level);
     if (items.length === 0) return null;
@@ -200,13 +179,9 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
             </h4>
             <div className="grid grid-cols-2 gap-2">
                 {items.map((s, i) => (
-                    <div key={i} className="bg-white p-2.5 rounded-lg border border-slate-100 shadow-sm text-sm font-medium text-slate-700 flex justify-between items-center group relative overflow-hidden">
+                    <div key={i} className="bg-white p-2.5 rounded-lg border border-slate-100 shadow-sm text-sm font-medium text-slate-700 flex justify-between items-center">
                         <span>{s.food}</span>
-                        {s.source === 'manual' && (
-                            <span className="text-[10px] bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded flex items-center gap-0.5" title="Manually Added">
-                                <Tag className="w-3 h-3" />
-                            </span>
-                        )}
+                        {s.source === 'manual' && <Tag className="w-3 h-3 text-slate-300" />}
                     </div>
                 ))}
             </div>
@@ -214,14 +189,12 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
     );
   };
   
-  // Group biomarkers for charts
   const getGroupedBiomarkers = () => {
       const grouped: {[key: string]: any[]} = {};
       biomarkers.forEach(b => {
           if (!grouped[b.name]) grouped[b.name] = [];
           grouped[b.name].push({ ...b, dateStr: new Date(b.date).toLocaleDateString() });
       });
-      // Sort by date
       Object.keys(grouped).forEach(k => {
           grouped[k].sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
       });
@@ -241,7 +214,6 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
              </button>
           </div>
 
-          {/* Tabs */}
           <div className="flex border-b border-slate-100 overflow-x-auto">
               <button 
                 onClick={() => setActiveTab('search')}
@@ -275,11 +247,9 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                  <div className="space-y-6 animate-in fade-in">
                      <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
                          <h3 className="font-bold text-indigo-900 mb-1 flex items-center gap-2">
-                             <TrendingUp className="w-4 h-4" /> Longitudinal Insights
+                             <TrendingUp className="w-4 h-4" /> Biomarker Trends
                          </h3>
-                         <p className="text-xs text-indigo-700">
-                             Upload multiple lab reports over time to see how your key biomarkers (CRP, Hormones, etc.) are changing.
-                         </p>
+                         <p className="text-xs text-indigo-700">Track CRP, Glucose, and Hormones across multiple reports.</p>
                      </div>
                      
                      {biomarkers.length === 0 ? (
@@ -312,16 +282,16 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
              ) : activeTab === 'search' ? (
                  <div className="space-y-6">
                      <div className="text-center mb-4">
-                         <h3 className="font-bold text-slate-800 text-lg">Global Trigger Search</h3>
-                         <p className="text-slate-500 text-sm">Search your complete sensitivity database.</p>
+                         <h3 className="font-bold text-slate-800 text-lg">Sensitivity Search</h3>
+                         <p className="text-slate-500 text-sm">Instant check against your clinical history.</p>
                      </div>
                      
                      <div className="relative">
                          <Search className="absolute left-4 top-3.5 w-5 h-5 text-slate-400" />
                          <input 
                             type="text" 
-                            placeholder="Type food (e.g. Garlic, Yeast)..." 
-                            className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="Type food (e.g. Tomato, Whey)..." 
+                            className="w-full pl-12 pr-4 py-3 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-medium"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                          />
@@ -332,36 +302,37 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                              {status === 'unsafe' && (
                                  <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl text-center">
                                      <AlertTriangle className="w-10 h-10 text-rose-500 mx-auto mb-2" />
-                                     <h3 className="text-xl font-black text-rose-600">UNSAFE</h3>
-                                     <p className="text-rose-800">Found in your HIGH sensitivity list.</p>
+                                     <h3 className="text-xl font-black text-rose-600 uppercase">Unsafe</h3>
+                                     <p className="text-rose-800 text-sm">This is marked as a HIGH sensitivity in your records.</p>
                                  </div>
                              )}
                              {status === 'caution' && (
                                  <div className="bg-orange-50 border border-orange-200 p-4 rounded-xl text-center">
                                      <AlertTriangle className="w-10 h-10 text-orange-500 mx-auto mb-2" />
-                                     <h3 className="text-xl font-black text-orange-600">CAUTION</h3>
-                                     <p className="text-orange-800">Found in your MEDIUM sensitivity list.</p>
+                                     <h3 className="text-xl font-black text-orange-600 uppercase">Caution</h3>
+                                     <p className="text-orange-800 text-sm">This is marked as a MEDIUM sensitivity.</p>
                                  </div>
                              )}
                              {status === 'safe' && (
                                  <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl text-center">
                                      <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2" />
-                                     <h3 className="text-xl font-black text-emerald-600">LIKELY SAFE</h3>
-                                     <p className="text-emerald-800">Found in your LOW sensitivity list.</p>
+                                     <h3 className="text-xl font-black text-emerald-600 uppercase">Likely Safe</h3>
+                                     <p className="text-emerald-800 text-sm">This is explicitly listed as a LOW sensitivity in your labs.</p>
                                  </div>
                              )}
                              {status === 'unknown' && (
-                                 <div className="bg-slate-100 p-4 rounded-xl text-center">
-                                     <p className="text-slate-500 font-medium">Not found in your uploaded reports.</p>
+                                 <div className="bg-slate-50 p-6 rounded-xl text-center border border-dashed border-slate-200">
+                                     <HelpCircle className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                                     <p className="text-slate-500 font-bold text-sm">Not found in your lab history.</p>
+                                     <p className="text-slate-400 text-xs mt-1">If you know this is a trigger, add it manually in the 'All Items' tab.</p>
                                  </div>
                              )}
                              
-                             {/* Matches List */}
                              <div className="mt-4 space-y-2">
                                  {filteredSensitivities.map((s, i) => (
                                      <div key={i} className="flex justify-between items-center bg-white p-3 rounded-lg shadow-sm border border-slate-100">
-                                         <span className="font-medium text-slate-700">{s.food}</span>
-                                         <span className={`text-xs font-bold px-2 py-1 rounded-full uppercase ${
+                                         <span className="font-bold text-slate-700">{s.food}</span>
+                                         <span className={`text-[10px] font-black px-2 py-1 rounded-full uppercase ${
                                              s.level === 'high' ? 'bg-rose-100 text-rose-600' : 
                                              s.level === 'medium' ? 'bg-orange-100 text-orange-600' : 
                                              'bg-emerald-100 text-emerald-600'
@@ -371,219 +342,126 @@ export const LabManager: React.FC<{ onClose: () => void }> = ({ onClose }) => {
                              </div>
                          </div>
                      )}
-                     
-                     {!searchQuery && (
-                         <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
-                             <div className="flex gap-2 items-start">
-                                 <Info className="w-4 h-4 text-indigo-500 mt-0.5" />
-                                 <p className="text-xs text-indigo-700">
-                                     Pro Tip: Before ordering at a restaurant, type ingredients here to check against your entire lab history.
-                                 </p>
-                             </div>
-                         </div>
-                     )}
                  </div>
              ) : activeTab === 'list' ? (
                  <div className="space-y-4">
                      <div className="flex items-center justify-between">
-                        <h3 className="font-bold text-slate-700">Your Sensitivity Profile</h3>
+                        <h3 className="font-bold text-slate-700">Digital Sensitivity Map</h3>
                         <button 
                             onClick={() => setShowAddTrigger(!showAddTrigger)}
-                            className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 hover:bg-slate-800"
+                            className="bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1"
                         >
                             {showAddTrigger ? <X className="w-3 h-3" /> : <Plus className="w-3 h-3" />}
-                            {showAddTrigger ? 'Cancel' : 'Add Custom'}
+                            {showAddTrigger ? 'Cancel' : 'Add Manual'}
                         </button>
                      </div>
 
-                     {/* Manual Add Form */}
                      {showAddTrigger && (
                          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm animate-in fade-in slide-in-from-top-2">
-                             <h4 className="font-bold text-slate-700 mb-3 text-sm">Add New Sensitivity</h4>
+                             <h4 className="font-bold text-slate-700 mb-3 text-sm">New Manual Entry</h4>
                              <div className="space-y-3">
-                                 <div>
-                                     <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Food / Ingredient</label>
-                                     <input 
-                                        type="text" 
-                                        className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none focus:border-indigo-500"
-                                        placeholder="e.g. Strawberries"
-                                        value={newTriggerName}
-                                        onChange={(e) => setNewTriggerName(e.target.value)}
-                                     />
-                                 </div>
+                                 <input 
+                                    type="text" 
+                                    className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none"
+                                    placeholder="e.g. Strawberries"
+                                    value={newTriggerName}
+                                    onChange={(e) => setNewTriggerName(e.target.value)}
+                                 />
                                  <div className="flex gap-2">
-                                     <div className="flex-1">
-                                         <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Sensitivity Level</label>
-                                         <select 
-                                            className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none"
-                                            value={newTriggerLevel}
-                                            onChange={(e) => setNewTriggerLevel(e.target.value as any)}
-                                         >
-                                             <option value="high">High (Avoid)</option>
-                                             <option value="medium">Medium (Limit)</option>
-                                             <option value="low">Low (Safe-ish)</option>
-                                         </select>
-                                     </div>
-                                     <div className="flex-1">
-                                         <label className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Category</label>
-                                         <select 
-                                            className="w-full p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm outline-none"
-                                            value={newTriggerCategory}
-                                            onChange={(e) => setNewTriggerCategory(e.target.value)}
-                                         >
-                                             <option value="Dairy">Dairy</option>
-                                             <option value="Gluten">Gluten</option>
-                                             <option value="Nightshade">Nightshade</option>
-                                             <option value="Fruit">Fruit</option>
-                                             <option value="Vegetable">Vegetable</option>
-                                             <option value="Grain">Grain</option>
-                                             <option value="Other">Other</option>
-                                         </select>
-                                     </div>
+                                     <select 
+                                        className="flex-1 p-2 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                                        value={newTriggerLevel}
+                                        onChange={(e) => setNewTriggerLevel(e.target.value as any)}
+                                     >
+                                         <option value="high">High</option>
+                                         <option value="medium">Medium</option>
+                                         <option value="low">Low</option>
+                                     </select>
+                                     <button 
+                                        onClick={handleSaveManualTrigger}
+                                        disabled={!newTriggerName.trim()}
+                                        className="bg-indigo-600 text-white px-4 rounded-lg font-bold text-sm disabled:opacity-50"
+                                     >
+                                         Save
+                                     </button>
                                  </div>
-                                 <button 
-                                    onClick={handleSaveManualTrigger}
-                                    disabled={!newTriggerName.trim()}
-                                    className="w-full bg-indigo-600 text-white py-2 rounded-lg font-bold text-sm disabled:opacity-50 hover:bg-indigo-700 flex items-center justify-center gap-2"
-                                 >
-                                     <Save className="w-4 h-4" /> Save Trigger
-                                 </button>
                              </div>
                          </div>
                      )}
                      
                      {sensitivities.length === 0 ? (
-                         <div className="text-center py-10 bg-white rounded-xl border border-slate-100 border-dashed">
-                             <p className="text-slate-400 italic">No sensitivities logged yet.</p>
-                             <button onClick={() => setActiveTab('reports')} className="mt-2 text-indigo-600 text-sm font-bold">Upload a report to populate</button>
+                         <div className="text-center py-10 opacity-40">
+                             <p className="italic">History is empty. Upload clinical labs to begin.</p>
                          </div>
                      ) : (
-                         <div className="animate-in fade-in slide-in-from-bottom-2">
-                            {renderGroup('high', 'High Priority (Avoid)', 'text-rose-600', <AlertTriangle className="w-4 h-4" />)}
-                            {renderGroup('medium', 'Medium Priority (Limit)', 'text-orange-600', <Info className="w-4 h-4" />)}
-                            {renderGroup('low', 'Low Priority (Safe-ish)', 'text-emerald-600', <CheckCircle2 className="w-4 h-4" />)}
+                         <div className="animate-in fade-in">
+                            {renderGroup('high', 'Avoid', 'text-rose-600', <AlertTriangle className="w-4 h-4" />)}
+                            {renderGroup('medium', 'Limit', 'text-orange-600', <Info className="w-4 h-4" />)}
+                            {renderGroup('low', 'Safe', 'text-emerald-600', <CheckCircle2 className="w-4 h-4" />)}
                          </div>
                      )}
                  </div>
              ) : (
                  <div className="space-y-6">
-                    {/* Upload Section */}
                     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                         <div className="flex justify-between items-center mb-3">
-                            <h3 className="font-bold text-slate-700">Add New Data</h3>
+                            <h3 className="font-bold text-slate-700">Digital Archive</h3>
                             <button onClick={() => setManualMode(!manualMode)} className="text-xs text-indigo-600 font-bold">
-                                {manualMode ? 'Cancel Manual Input' : 'Type Manually'}
+                                {manualMode ? 'Cancel' : 'Manual Entry'}
                             </button>
                         </div>
                         
-                        <div className="flex gap-2 mb-3 overflow-x-auto pb-2 no-scrollbar">
-                            {['food_sensitivity', 'microbiome', 'hormonal', 'bloodwork'].map((t) => (
-                                <button 
-                                    key={t}
-                                    onClick={() => setUploadType(t as any)}
-                                    className={`px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap border transition-colors ${
-                                        uploadType === t 
-                                        ? 'bg-indigo-600 text-white border-indigo-600' 
-                                        : 'bg-slate-50 text-slate-500 border-slate-200'
-                                    }`}
-                                >
-                                    {t.replace('_', ' ').toUpperCase()}
-                                </button>
-                            ))}
-                        </div>
-                        
-                        {manualMode ? (
-                            <div className="space-y-3">
-                                <textarea 
-                                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none h-32"
-                                    placeholder="Paste text from your report here..."
-                                    value={manualText}
-                                    onChange={(e) => setManualText(e.target.value)}
-                                />
-                                <button 
-                                    onClick={handleManualSubmit}
-                                    disabled={!manualText.trim() || isProcessing}
-                                    className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold text-sm disabled:opacity-50"
-                                >
-                                    {isProcessing ? 'Saving...' : 'Save Manual Entry'}
-                                </button>
-                            </div>
-                        ) : (
-                            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-50 hover:border-indigo-400 transition-colors relative overflow-hidden">
+                        {!manualMode && (
+                            <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-50 transition-colors relative overflow-hidden">
                                 {isProcessing ? (
-                                    <div className="text-center relative z-10 bg-white/80 p-4 rounded-xl backdrop-blur-sm w-full h-full flex flex-col items-center justify-center">
-                                        <div className="w-full max-w-[200px] bg-slate-200 rounded-full h-2 mb-3">
-                                            <div className="bg-indigo-500 h-2 rounded-full animate-pulse" style={{width: '100%'}}></div>
-                                        </div>
-                                        <p className="text-sm font-bold text-indigo-600">{processingStatus || "Processing..."}</p>
+                                    <div className="text-center p-4 bg-white/80 w-full h-full flex flex-col items-center justify-center backdrop-blur-sm">
+                                        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin mb-2" />
+                                        <p className="text-xs font-bold text-indigo-600">{processingStatus || "Syncing Data..."}</p>
                                     </div>
                                 ) : (
                                     <div className="text-center">
                                         <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                                        <p className="text-sm font-bold text-slate-600">Tap to Upload Pages</p>
-                                        <p className="text-xs text-slate-400">PDFs, Images • Select Multiple Files</p>
+                                        <p className="text-sm font-bold text-slate-600">Upload Labs (PDF/Image)</p>
                                     </div>
                                 )}
-                                <input 
-                                    type="file" 
-                                    accept="image/*,application/pdf" 
-                                    multiple 
-                                    className="hidden" 
-                                    onChange={handleFileUpload} 
-                                    disabled={isProcessing} 
-                                />
+                                <input type="file" accept="image/*,application/pdf" multiple className="hidden" onChange={handleFileUpload} disabled={isProcessing} />
                             </label>
+                        )}
+
+                        {manualMode && (
+                            <div className="space-y-3">
+                                <textarea 
+                                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm h-32 outline-none"
+                                    placeholder="Paste clinical text summary..."
+                                    value={manualText}
+                                    onChange={(e) => setManualText(e.target.value)}
+                                />
+                                <button onClick={handleManualSubmit} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold text-sm">Save Text Entry</button>
+                            </div>
                         )}
                     </div>
 
-                    {/* Reports List */}
                     <div className="space-y-3">
-                        <h3 className="font-bold text-slate-700 text-sm uppercase tracking-wide">Saved Reports</h3>
-                        {reports.length === 0 ? (
-                            <p className="text-center text-slate-400 text-sm italic py-4">No reports uploaded yet.</p>
-                        ) : (
-                            reports.map((report) => (
-                                <div key={report.id} className="bg-white border border-slate-100 p-4 rounded-xl shadow-sm transition-all hover:border-indigo-100">
-                                    <div className="flex justify-between items-start mb-2">
-                                        <div className="flex items-center gap-2">
-                                            {report.type === 'microbiome' ? <Dna className="w-4 h-4 text-purple-500" /> : 
-                                             report.type === 'hormonal' ? <Activity className="w-4 h-4 text-rose-500" /> :
-                                             <FileText className="w-4 h-4 text-teal-500" />}
-                                            <span className="font-bold text-slate-800 capitalize">{report.type.replace('_', ' ')}</span>
-                                        </div>
-                                        <span className="text-xs text-slate-400">{new Date(report.dateUploaded).toLocaleDateString()}</span>
-                                    </div>
-                                    
-                                    <div className={`text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-100 relative ${expandedReportId === report.id ? '' : 'max-h-24 overflow-hidden'}`}>
-                                        <p className="whitespace-pre-wrap">{report.summary}</p>
-                                        
-                                        {expandedReportId !== report.id && (
-                                            <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-slate-50 to-transparent" />
-                                        )}
-                                    </div>
-                                    
-                                    <button 
-                                        onClick={() => setExpandedReportId(expandedReportId === report.id ? null : report.id)}
-                                        className="w-full mt-2 text-xs font-bold text-indigo-600 flex items-center justify-center gap-1 hover:text-indigo-800 py-1"
-                                    >
-                                        {expandedReportId === report.id ? (
-                                            <>Show Less <ChevronUp className="w-3 h-3" /></>
-                                        ) : (
-                                            <>Read Full Analysis <ChevronDown className="w-3 h-3" /></>
-                                        )}
-                                    </button>
+                        <h3 className="font-bold text-slate-400 text-[10px] uppercase tracking-widest">Archived Reports</h3>
+                        {reports.map((report) => (
+                            <div key={report.id} className="bg-white border border-slate-100 p-4 rounded-xl shadow-sm">
+                                <div className="flex justify-between items-start mb-2">
+                                    <span className="font-bold text-slate-800 capitalize text-sm">{report.type.replace('_', ' ')}</span>
+                                    <span className="text-[10px] text-slate-400">{new Date(report.dateUploaded).toLocaleDateString()}</span>
                                 </div>
-                            ))
-                        )}
+                                <p className={`text-xs text-slate-600 leading-relaxed ${expandedReportId === report.id ? '' : 'line-clamp-2'}`}>{report.summary}</p>
+                                <button onClick={() => setExpandedReportId(expandedReportId === report.id ? null : report.id)} className="text-[10px] font-black text-indigo-600 mt-2 uppercase tracking-wider">
+                                    {expandedReportId === report.id ? 'Collapse' : 'Expand Details'}
+                                </button>
+                            </div>
+                        ))}
                     </div>
                  </div>
              )}
           </div>
 
           <div className="p-4 border-t border-slate-100 bg-slate-50">
-             <button onClick={onClose} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-slate-800">
-               Done
-             </button>
+             <button onClick={onClose} className="w-full bg-slate-900 text-white py-3 rounded-xl font-bold">Close Lab Vault</button>
           </div>
        </div>
     </div>
