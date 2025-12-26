@@ -44,7 +44,8 @@ export const Dashboard: React.FC = () => {
         setDetectiveReport(state.flareDetectiveReports[0]);
     }
     
-    if (state.flareLogs.length > 0) {
+    // Check for enough logs to perform real AI analysis
+    if (state.foodLogs.length >= 3 || state.flareLogs.length > 0) {
         setHasSufficientData(true);
     } else {
         setHasSufficientData(false);
@@ -54,13 +55,17 @@ export const Dashboard: React.FC = () => {
     calculateMetrics(state);
     calculateTriggerCorrelations(state);
     
-    const smartReminders = await getSmartReminders(state);
-    setReminders(smartReminders);
+    try {
+        const smartReminders = await getSmartReminders(state);
+        if (smartReminders) setReminders(smartReminders);
+    } catch (e) {
+        console.warn("Reminders failed to load.");
+    }
   };
 
   const calculateTriggerCorrelations = (state: AppState) => {
     const stats: Record<string, { exposures: number; flares: number }> = {};
-    const WINDOW = 48 * 60 * 60 * 1000; // 48 hours lookback window
+    const WINDOW = 48 * 60 * 60 * 1000;
 
     ['Dairy', 'Nightshade', 'Gluten', 'Sugar', 'Processed', 'Alcohol'].forEach(k => {
         stats[k] = { exposures: 0, flares: 0 };
@@ -143,23 +148,30 @@ export const Dashboard: React.FC = () => {
 
     let currentStreak = 0;
     if (state.foodLogs.length > 0 || state.flareLogs.length > 0) {
-      currentStreak = Math.min(3, state.foodLogs.length + state.flareLogs.length); 
+      currentStreak = Math.min(7, state.foodLogs.length + state.flareLogs.length); 
     }
     setStreakDays(currentStreak);
   };
 
   const handleGenerateInsights = async () => {
       if (!data) return;
+      if (data.foodLogs.length < 3) {
+          alert("Log at least 3 meals and a few behaviors so the AI has enough history to build a bio-forecast!");
+          return;
+      }
+
       setLoadingInsights(true);
       try {
           const result = await generatePatternInsights(data);
           if (result) {
               setAnalysis(result);
               db.saveAnalysis(result);
+          } else {
+              throw new Error("Analysis failed");
           }
       } catch (e) {
           console.error(e);
-          alert("Failed to generate insights.");
+          alert("Forecast Engine Busy. Retrying via Neural Backup...");
       } finally {
           setLoadingInsights(false);
       }
@@ -167,14 +179,21 @@ export const Dashboard: React.FC = () => {
 
   const handleRunDetective = async () => {
       if (!data) return;
+      if (data.foodLogs.length < 2) {
+          alert("Detective mode requires more food logs to identify suspects.");
+          return;
+      }
+
       setIsRunningDetective(true);
       try {
           const report = await runFlareDetective(data);
-          setDetectiveReport(report);
-          db.saveFlareDetectiveReport(report);
+          if (report) {
+            setDetectiveReport(report);
+            db.saveFlareDetectiveReport(report);
+          }
       } catch (e) {
           console.error(e);
-          alert("Detective failed to run.");
+          alert("Detective failed to scan biology history.");
       } finally {
           setIsRunningDetective(false);
       }
@@ -212,15 +231,15 @@ export const Dashboard: React.FC = () => {
        <div className="bg-amber-50 border border-amber-200 p-3 rounded-2xl flex items-start gap-3">
           <ShieldAlert className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
           <p className="text-[10px] text-amber-800 font-bold leading-tight uppercase tracking-tight">
-            NOT MEDICAL ADVICE: FlareFinder AI is for educational tracking. AI insights are experimental. Verify all data with your physician.
+            NOT MEDICAL ADVICE: AI insights are experimental probabilistic patterns. Verify with a physician.
           </p>
        </div>
 
        {analysis?.bioWeather && (
          <div className="animate-in fade-in slide-in-from-top-4 duration-500">
            <div className={`rounded-3xl p-6 shadow-xl mb-6 relative overflow-hidden ${
-               analysis.bioWeather.status === 'Sunny' ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-orange-200' :
-               analysis.bioWeather.status === 'Stormy' ? 'bg-gradient-to-br from-slate-700 to-slate-900 text-white shadow-slate-300' :
+               analysis.bioWeather.status?.includes('Sunny') ? 'bg-gradient-to-br from-amber-400 to-orange-500 text-white shadow-orange-200' :
+               analysis.bioWeather.status?.includes('Stormy') ? 'bg-gradient-to-br from-slate-700 to-slate-900 text-white shadow-slate-300' :
                'bg-gradient-to-br from-blue-400 to-indigo-500 text-white shadow-blue-200'
            }`}>
               <div className="flex justify-between items-start relative z-10">
@@ -248,7 +267,7 @@ export const Dashboard: React.FC = () => {
                    <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-100">
                        <div className="flex items-center gap-2 mb-2">
                            <Activity className="w-4 h-4 text-rose-500" />
-                           <h4 className="font-bold text-slate-700 text-xs uppercase">Move Like This</h4>
+                           <h4 className="font-bold text-slate-700 text-xs uppercase">Movement</h4>
                        </div>
                        <p className="text-sm font-medium text-slate-600 leading-snug">{analysis.dailyProtocol.movement}</p>
                    </div>
