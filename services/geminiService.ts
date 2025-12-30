@@ -4,16 +4,42 @@ import { AppState, FoodLog, BehaviorLog, Reminder, UserProfile, DeepAnalysis, Ma
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Initialize PDF.js worker from CDN
-if (typeof window !== 'undefined' && pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
-    const WORKER_VERSION = process.env.WORKER_VERSION || '4.0.379';
-    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${WORKER_VERSION}/build/pdf.worker.min.mjs`;
-}
+// Define strict schemas for clinical data extraction
+const LAB_RESULT_SCHEMA = {
+    type: Type.OBJECT,
+    properties: {
+        sensitivities: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                required: ["food", "level"],
+                properties: {
+                    food: { type: Type.STRING, description: "The specific food or ingredient identified." },
+                    level: { type: Type.STRING, enum: ["high", "medium", "low"], description: "The level of sensitivity or reactivity." },
+                    category: { type: Type.STRING, description: "Biological category (e.g. Dairy, Nightshade)." }
+                }
+            }
+        },
+        biomarkers: {
+            type: Type.ARRAY,
+            items: {
+                type: Type.OBJECT,
+                required: ["name", "value", "unit"],
+                properties: {
+                    name: { type: Type.STRING, description: "Biomarker name like CRP, Glucose, etc." },
+                    value: { type: Type.NUMBER, description: "Numerical value." },
+                    unit: { type: Type.STRING, description: "Measurement unit (mg/L, mmol, etc.)." },
+                    status: { type: Type.STRING, enum: ["normal", "high", "low"] }
+                }
+            }
+        },
+        summary: { type: Type.STRING, description: "A brief clinical summary of the findings." }
+    }
+};
 
 const PRO_MODEL = 'gemini-3-pro-preview';
 const FLASH_MODEL = 'gemini-3-flash-preview';
 
-// Simple circuit breaker & pacing
 let proModelLockUntil = 0;
 let lastRequestTime = 0;
 
@@ -32,25 +58,18 @@ const prepareLogsForAi = (logs: any[]) => {
     });
 };
 
-/**
- * Executes a task with rate-limiting awareness.
- */
 async function smartExecute<T>(
     preferredModel: string, 
     task: (model: string) => Promise<T>
 ): Promise<T> {
     const now = Date.now();
-    
-    // Ensure at least 1 second between any AI requests to prevent burst 429s
     const timeSinceLastReq = now - lastRequestTime;
     if (timeSinceLastReq < 1000) {
         await delay(1000 - timeSinceLastReq);
     }
     lastRequestTime = Date.now();
 
-    // Circuit breaker for Pro
     if (preferredModel === PRO_MODEL && Date.now() < proModelLockUntil) {
-        console.info("[Neural Engine] Pro Model cooling down. Using Flash.");
         return await withRetry(() => task(FLASH_MODEL), 2);
     }
 
@@ -58,13 +77,10 @@ async function smartExecute<T>(
         return await task(preferredModel);
     } catch (err: any) {
         const status = err?.status || err?.error?.status;
-        
         if (status === 429 && preferredModel === PRO_MODEL) {
-            proModelLockUntil = Date.now() + 60000; // Lock Pro for 60s
+            proModelLockUntil = Date.now() + 60000;
         }
-
         if (preferredModel === PRO_MODEL) {
-            console.warn(`[Neural Engine] Pro Model Quota Limit. Falling back to Flash...`);
             return await withRetry(() => task(FLASH_MODEL), 2);
         }
         throw err;
@@ -82,7 +98,6 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
       if (status === 500 || status === 503 || status === 429) {
         if (i < maxRetries - 1) {
           const wait = Math.pow(3, i + 1) * 1000; 
-          console.warn(`[Neural Engine] API Busy. Retrying in ${wait}ms...`);
           await delay(wait);
           continue;
         }
@@ -108,6 +123,12 @@ const safeJsonParse = (text: string | undefined | null) => {
 
 const extractPdfPages = async (base64Data: string): Promise<string[]> => {
     try {
+        // Initialize worker only when needed to prevent blocking
+        if (typeof window !== 'undefined' && pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
+            const WORKER_VERSION = '4.0.379';
+            pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${WORKER_VERSION}/build/pdf.worker.min.mjs`;
+        }
+
         const binaryString = atob(base64Data);
         const bytes = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
@@ -130,6 +151,67 @@ const extractPdfPages = async (base64Data: string): Promise<string[]> => {
     }
 };
 
+export const parseLabResults = async (
+    base64Data: string, 
+    mimeType: string, 
+    reportType: string,
+    onProgress?: (status: string) => void
+): Promise<{sensitivities: FoodSensitivity[], summary: string, extractedBiomarkers?: Biomarker[]}> => {
+  const ai = getAiClient();
+  if (!ai) throw new Error("AI Offline");
+
+  const processChunk = async (chunkText: string) => {
+      await delay(1000);
+      return await smartExecute(PRO_MODEL, async (model) => {
+          const response = await ai.models.generateContent({
+              model: model, 
+              contents: `Carefully extract all clinical data from this medical report text. Identify food sensitivities with their reactive levels (high, medium, low) and any biomarkers (CRP, Vitamin D, Glucose, etc.) with their values and units. Report text: "${chunkText}".`,
+              config: { 
+                  responseMimeType: "application/json",
+                  responseSchema: LAB_RESULT_SCHEMA
+              }
+          });
+          const result = safeJsonParse(response.text);
+          if (!result) throw new Error("Invalid Lab JSON");
+          return result;
+      });
+  };
+
+  let allSensitivities: FoodSensitivity[] = [];
+  let allBiomarkers: Biomarker[] = [];
+  let combinedSummary = "";
+
+  if (mimeType === 'application/pdf') {
+      const pages = await extractPdfPages(base64Data);
+      for (let i = 0; i < pages.length; i++) {
+          if (onProgress) onProgress(`Analyzing page ${i+1}/${pages.length}...`);
+          try {
+              const result = await processChunk(pages[i]);
+              if (result) {
+                  if (result.sensitivities) allSensitivities = [...allSensitivities, ...result.sensitivities];
+                  if (result.biomarkers) allBiomarkers = [...allBiomarkers, ...result.biomarkers];
+                  if (result.summary) combinedSummary += result.summary + " ";
+              }
+          } catch (e) {
+              console.error(`Failed to process page ${i+1}. Skipping.`, e);
+          }
+      }
+  } else {
+      const result = await processChunk(`[CLINICAL DATA FROM IMAGE]`);
+      if (result) {
+          allSensitivities = result.sensitivities || [];
+          allBiomarkers = result.biomarkers || [];
+          combinedSummary = result.summary || "";
+      }
+  }
+
+  return {
+      sensitivities: allSensitivities.map((s: any) => ({ ...s, dateDetected: new Date().toISOString(), source: 'lab_result' })),
+      extractedBiomarkers: allBiomarkers.map((b: any) => ({ ...b, date: new Date().toISOString() })),
+      summary: combinedSummary.trim() || "Clinical report analysis completed successfully."
+  };
+};
+
 export const analyzeFoodImage = async (base64Image: string, mimeType: string = "image/jpeg", user?: UserProfile | null): Promise<Partial<FoodLog>> => {
   const ai = getAiClient();
   if (!ai) throw new Error("AI Offline");
@@ -137,7 +219,7 @@ export const analyzeFoodImage = async (base64Image: string, mimeType: string = "
   return smartExecute(PRO_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Analyze this image for a user with ${user?.condition}. Decompose the meal into constituent items. Provide nutritional data including calories for EVERY item. Return JSON.` }] },
+        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Analyze this meal image for a user with ${user?.condition}. Break down into items with full nutrition.` }] },
         config: { 
             responseMimeType: "application/json",
             responseSchema: {
@@ -151,7 +233,7 @@ export const analyzeFoodImage = async (base64Image: string, mimeType: string = "
                             required: ["name", "category", "ingredients", "reasoning", "nutrition"],
                             properties: {
                                 name: { type: Type.STRING },
-                                category: { type: Type.STRING, description: "e.g., Dairy, Nightshade, Protein, etc." },
+                                category: { type: Type.STRING },
                                 ingredients: { type: Type.ARRAY, items: { type: Type.STRING } },
                                 reasoning: { type: Type.STRING },
                                 nutrition: {
@@ -169,7 +251,7 @@ export const analyzeFoodImage = async (base64Image: string, mimeType: string = "
                                         type: Type.OBJECT,
                                         properties: {
                                             name: { type: Type.STRING },
-                                            safetyLevel: { type: Type.STRING, description: "high, medium, or safe" },
+                                            safetyLevel: { type: Type.STRING },
                                             reason: { type: Type.STRING }
                                         }
                                     }
@@ -182,7 +264,7 @@ export const analyzeFoodImage = async (base64Image: string, mimeType: string = "
         }
     });
     const result = safeJsonParse(response.text);
-    if (!result) throw new Error("Invalid Analysis JSON");
+    if (!result) throw new Error("Invalid Food Analysis JSON");
     return result;
   });
 };
@@ -194,8 +276,7 @@ export const enrichManualFoodItem = async (foodName: string, user: UserProfile):
   return smartExecute(PRO_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: `Provide biological analysis for food: "${foodName}" for a person with ${user.condition}. 
-        Return full JSON mapping of ingredients, reasoning for safety, and nutritional content.`,
+        contents: `Biological analysis for: "${foodName}" for a person with ${user.condition}. JSON.`,
         config: { 
             responseMimeType: "application/json",
             responseSchema: {
@@ -213,17 +294,6 @@ export const enrichManualFoodItem = async (foodName: string, user: UserProfile):
                             protein: { type: Type.NUMBER },
                             carbs: { type: Type.NUMBER },
                             fat: { type: Type.NUMBER }
-                        }
-                    },
-                    ingredientAnalysis: {
-                        type: Type.ARRAY,
-                        items: {
-                            type: Type.OBJECT,
-                            properties: {
-                                name: { type: Type.STRING },
-                                safetyLevel: { type: Type.STRING },
-                                reason: { type: Type.STRING }
-                            }
                         }
                     }
                 }
@@ -246,10 +316,7 @@ export const generatePatternInsights = async (state: AppState): Promise<DeepAnal
   return smartExecute(PRO_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: `Analyze trends for ${state.user?.condition}. 
-        Meals: ${JSON.stringify(cleanFoodLogs)}
-        Flares: ${JSON.stringify(cleanFlareLogs)}
-        JSON only.`,
+        contents: `Pattern Analysis. Condition: ${state.user?.condition}. Logs: ${JSON.stringify({ meals: cleanFoodLogs, flares: cleanFlareLogs })}. JSON.`,
         config: { 
             responseMimeType: "application/json",
             responseSchema: {
@@ -283,74 +350,16 @@ export const generatePatternInsights = async (state: AppState): Promise<DeepAnal
   });
 };
 
-export const parseLabResults = async (
-    base64Data: string, 
-    mimeType: string, 
-    reportType: string,
-    onProgress?: (status: string) => void
-): Promise<{sensitivities: FoodSensitivity[], summary: string, extractedBiomarkers?: Biomarker[]}> => {
-  const ai = getAiClient();
-  if (!ai) throw new Error("AI Offline");
-
-  const processChunk = async (chunkText: string) => {
-      await delay(1500);
-      return await smartExecute(PRO_MODEL, async (model) => {
-          const response = await ai.models.generateContent({
-              model: model, 
-              contents: `Clinical Report Extraction: "${chunkText}". Identify sensitivities and biomarkers. JSON.`,
-              config: { responseMimeType: "application/json" }
-          });
-          const result = safeJsonParse(response.text);
-          if (!result) throw new Error("Invalid Lab JSON");
-          return result;
-      });
-  };
-
-  let allSensitivities: FoodSensitivity[] = [];
-  let allBiomarkers: Biomarker[] = [];
-  let combinedSummary = "";
-
-  if (mimeType === 'application/pdf') {
-      const pages = await extractPdfPages(base64Data);
-      for (let i = 0; i < pages.length; i++) {
-          if (onProgress) onProgress(`Analyzing page ${i+1}/${pages.length}...`);
-          try {
-              const result = await processChunk(pages[i]);
-              if (result) {
-                  if (result.sensitivities) allSensitivities = [...allSensitivities, ...result.sensitivities];
-                  if (result.biomarkers) allBiomarkers = [...allBiomarkers, ...result.biomarkers];
-                  if (result.summary) combinedSummary += result.summary + " ";
-              }
-          } catch (e) {
-              console.error(`Failed to process page ${i+1}. Skipping.`, e);
-          }
-      }
-  } else {
-      const result = await processChunk(`[IMAGE DATA]`);
-      if (result) {
-          allSensitivities = result.sensitivities || [];
-          allBiomarkers = result.biomarkers || [];
-          combinedSummary = result.summary || "";
-      }
-  }
-
-  return {
-      sensitivities: allSensitivities.map((s: any) => ({ ...s, dateDetected: new Date().toISOString(), source: 'lab_result' })),
-      extractedBiomarkers: allBiomarkers.map((b: any) => ({ ...b, date: new Date().toISOString() })),
-      summary: combinedSummary.trim() || "Report analyzed."
-  };
-};
-
 export const chatWithCoach = async (message: string, state: AppState): Promise<{reply: string, suggestions: string[], richContent?: any}> => {
   const ai = getAiClient();
   if (!ai) return { reply: "AI Offline.", suggestions: [] };
   return smartExecute(PRO_MODEL, async (model) => {
       const response = await ai.models.generateContent({
           model: model,
-          contents: `Coach. Condition: ${state.user?.condition}. Message: ${message}. JSON {reply, suggestions}.`,
+          contents: `Coach mode. Condition: ${state.user?.condition}. Message: ${message}. JSON.`,
           config: { responseMimeType: "application/json" }
       });
-      return safeJsonParse(response.text) || { reply: "Engine busy.", suggestions: [] };
+      return safeJsonParse(response.text) || { reply: "Bio-Twin engine busy.", suggestions: [] };
   });
 };
 
@@ -360,7 +369,7 @@ export const getSmartReminders = async (state: AppState): Promise<Reminder[]> =>
   try {
       const response = await ai.models.generateContent({
           model: FLASH_MODEL,
-          contents: `Health reminders for ${state.user?.condition}. JSON.`,
+          contents: `Personalized reminders for ${state.user?.condition} based on history. JSON.`,
           config: { responseMimeType: "application/json" }
       });
       const parsed = safeJsonParse(response.text);
@@ -375,7 +384,7 @@ export const runFlareDetective = async (state: AppState): Promise<FlareDetective
     return smartExecute(PRO_MODEL, async (model) => {
         const response = await ai.models.generateContent({
             model: model,
-            contents: `Detective. Condition: ${state.user?.condition}. Food: ${JSON.stringify(cleanFoodLogs)}. JSON.`,
+            contents: `Root cause detective. Condition: ${state.user?.condition}. Food History: ${JSON.stringify(cleanFoodLogs)}. JSON.`,
             config: { responseMimeType: "application/json" }
         });
         const report = safeJsonParse(response.text);
@@ -390,7 +399,7 @@ export const scanGroceryProduct = async (base64Image: string, mimeType: string =
   return smartExecute(PRO_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Analyze grocery product for ${user?.condition}. JSON.` }] },
+        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Grocery scan for ${user?.condition}. Safety check. JSON.` }] },
         config: { 
             responseMimeType: "application/json",
             responseSchema: {
@@ -429,7 +438,7 @@ export const simulateMealImpact = async (base64Image: string, mimeType: string =
   return smartExecute(PRO_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Impact for ${user.condition}. JSON.` }] },
+        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Simulate impact for ${user.condition}. JSON.` }] },
         config: { responseMimeType: "application/json" }
     });
     const result = safeJsonParse(response.text);
@@ -444,7 +453,7 @@ export const analyzeRestaurantMenu = async (base64Image: string, mimeType: strin
     return smartExecute(PRO_MODEL, async (model) => {
         const response = await ai.models.generateContent({
             model: model,
-            contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Menu Scan. JSON.` }] },
+            contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Analyze menu for safety with ${user.condition}. JSON.` }] },
             config: { responseMimeType: "application/json" }
         });
         const result = safeJsonParse(response.text);
@@ -459,7 +468,7 @@ export const getMarketplaceRecommendations = async (user: UserProfile): Promise<
   try {
     const response = await ai.models.generateContent({
         model: FLASH_MODEL,
-        contents: `Marketplace. JSON.`,
+        contents: `Safe products for ${user.condition}. JSON.`,
         config: { responseMimeType: "application/json" }
     });
     return safeJsonParse(response.text) || [];
@@ -472,7 +481,7 @@ export const getGlobalInsights = async (condition: string): Promise<GlobalInsigh
   try {
     const response = await ai.models.generateContent({
         model: FLASH_MODEL,
-        contents: `Trends for ${condition}. JSON.`,
+        contents: `Aggregated data trends for ${condition}. JSON.`,
         config: { responseMimeType: "application/json" }
     });
     return safeJsonParse(response.text) || [];
@@ -549,7 +558,7 @@ export const generateSafeMealPlan = async (user: UserProfile): Promise<DayPlan> 
     return smartExecute(PRO_MODEL, async (model) => {
         const response = await ai.models.generateContent({
             model: model,
-            contents: `Meal plan. JSON.`,
+            contents: `Meal plan for ${user.condition}. JSON.`,
             config: { responseMimeType: "application/json" }
         });
         const result = safeJsonParse(response.text);
