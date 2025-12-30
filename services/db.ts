@@ -14,6 +14,14 @@ const initialDb: AppState = {
   biomarkers: []
 };
 
+// Fallback UUID for non-secure contexts
+const generateId = () => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+};
+
 export const db = {
   getState: (): AppState => {
     try {
@@ -92,13 +100,19 @@ export const db = {
 
   deleteFoodLog: (id: string) => {
     const state = db.getState();
-    state.foodLogs = state.foodLogs.filter(l => l.id !== id);
+    state.foodLogs = state.foodLogs.filter(l => String(l.id) !== String(id));
     return db.saveState(state);
   },
 
   addFlareLog: (log: FlareLog) => {
     const state = db.getState();
     state.flareLogs = [log, ...state.flareLogs];
+    return db.saveState(state);
+  },
+
+  deleteFlareLog: (id: string) => {
+    const state = db.getState();
+    state.flareLogs = state.flareLogs.filter(l => String(l.id) !== String(id));
     return db.saveState(state);
   },
 

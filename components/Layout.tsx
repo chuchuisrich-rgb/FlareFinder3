@@ -1,5 +1,5 @@
 
-import { LayoutDashboard, Camera, Flame, Activity, Settings, MessageCircleHeart, ShoppingBag } from 'lucide-react';
+import { LayoutDashboard, Camera, Flame, Activity, Settings, ShoppingBag } from 'lucide-react';
 import React from 'react';
 
 interface LayoutProps {
@@ -57,12 +57,6 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange
             onClick={() => onTabChange('flare')} 
             icon={<Flame />} 
             label="Flare" 
-          />
-           <NavButton 
-            active={activeTab === 'coach'} 
-            onClick={() => onTabChange('coach')} 
-            icon={<MessageCircleHeart />} 
-            label="Coach" 
           />
           <NavButton 
             active={activeTab === 'daily'} 

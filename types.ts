@@ -94,12 +94,12 @@ export interface FlareLog {
   locations?: string[]; // multiple selected locations
   bodyPoints?: { x: number; y: number }[]; // x,y coordinates on body map (0-100 scale)
   drawnPaths?: { x: number; y: number }[][]; // Array of paths (each path is array of points)
-  painLevel: number; // 0-10
   notes: string;
   weather?: {
     temperature: number;
     humidity: number;
   };
+  painLevel?: number; // Kept as optional for backward compatibility
 }
 
 export interface BehaviorLog {

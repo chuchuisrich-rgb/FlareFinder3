@@ -482,14 +482,65 @@ export const getGlobalInsights = async (condition: string): Promise<GlobalInsigh
 export const processVoiceCommand = async (text: string, user?: UserProfile | null): Promise<{ foodLogs: Partial<FoodLog>[], behaviorLogs: Partial<BehaviorLog>[] }> => {
   const ai = getAiClient();
   if (!ai) throw new Error("AI Offline");
-  try {
+  
+  return smartExecute(FLASH_MODEL, async (model) => {
     const response = await ai.models.generateContent({
-        model: FLASH_MODEL,
-        contents: `Logs from: "${text}". JSON.` ,
-        config: { responseMimeType: "application/json" }
+        model: model,
+        contents: `The user says: "${text}". Extract any food mentioned and convert to a food log. For each food item, include nutrition data (calories, protein, carbs, fat) and analyze if it triggers ${user?.condition}. Return a JSON object with 'foodLogs' and 'behaviorLogs' keys.`,
+        config: { 
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                required: ["foodLogs", "behaviorLogs"],
+                properties: {
+                    foodLogs: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            required: ["detectedItems"],
+                            properties: {
+                                detectedItems: {
+                                    type: Type.ARRAY,
+                                    items: {
+                                        type: Type.OBJECT,
+                                        required: ["name", "category", "ingredients", "reasoning", "nutrition"],
+                                        properties: {
+                                            name: { type: Type.STRING },
+                                            category: { type: Type.STRING },
+                                            ingredients: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                            reasoning: { type: Type.STRING },
+                                            nutrition: {
+                                                type: Type.OBJECT,
+                                                properties: {
+                                                    calories: { type: Type.NUMBER },
+                                                    protein: { type: Type.NUMBER },
+                                                    carbs: { type: Type.NUMBER },
+                                                    fat: { type: Type.NUMBER }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    behaviorLogs: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                type: { type: Type.STRING },
+                                value: { type: Type.NUMBER },
+                                details: { type: Type.STRING }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     });
     return safeJsonParse(response.text) || { foodLogs: [], behaviorLogs: [] };
-  } catch { return { foodLogs: [], behaviorLogs: [] }; }
+  });
 };
 
 export const generateSafeMealPlan = async (user: UserProfile): Promise<DayPlan> => {
