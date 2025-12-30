@@ -1,10 +1,34 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Upload, Loader2, CheckCircle, AlertCircle, Plus, Flame, Leaf, HelpCircle, Utensils, ArrowRight, Sparkles, Clock, Calendar, Trash2, X, ThumbsUp, ThumbsDown, Check, Edit2, Keyboard, FlaskConical, AlertTriangle, ShieldCheck, ScanBarcode, ShoppingCart, ListPlus, Activity, ChefHat, Droplet, Save, ShieldAlert, Shield, SearchX } from 'lucide-react';
-import { analyzeFoodImage, processVoiceCommand, simulateMealImpact, scanGroceryProduct } from '../services/geminiService';
+import { Camera, Upload, Loader2, CheckCircle, AlertCircle, Plus, Flame, Leaf, HelpCircle, Utensils, ArrowRight, Sparkles, Clock, Calendar, Trash2, X, ThumbsUp, ThumbsDown, Check, Edit2, Keyboard, FlaskConical, AlertTriangle, ShieldCheck, ScanBarcode, ShoppingCart, ListPlus, Activity, ChefHat, Droplet, Save, ShieldAlert, Shield, SearchX, Zap } from 'lucide-react';
+import { analyzeFoodImage, processVoiceCommand, simulateMealImpact, scanGroceryProduct, enrichManualFoodItem } from '../services/geminiService';
 import { db } from '../services/db';
 import { FoodLog, FoodItem, SimulationResult, ShoppingListItem } from '../types';
 import { VoiceRecorder } from './VoiceRecorder';
+
+// Utility to compress images to save localStorage space
+const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.7): Promise<string> => {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.src = base64Str;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxWidth) {
+        height = Math.round((height * maxWidth) / width);
+        width = maxWidth;
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      ctx?.drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+  });
+};
 
 export const FoodLogger: React.FC = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -14,14 +38,23 @@ export const FoodLogger: React.FC = () => {
   const [simulationResult, setSimulationResult] = useState<SimulationResult | null>(null);
   const [history, setHistory] = useState<FoodLog[]>([]);
   const [manualAddInput, setManualAddInput] = useState('');
+  const [isEnrichingManual, setIsEnrichingManual] = useState(false);
   const [textInput, setTextInput] = useState('');
-  const [confirmedIndices, setConfirmedIndices] = useState<Set<number>>(new Set());
   const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [mode, setMode] = useState<'meal' | 'grocery'>('meal');
+  const [isSavingStatus, setIsSavingStatus] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const listEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadHistory();
   }, []);
+
+  useEffect(() => {
+    if (analysisResult?.detectedItems && analysisResult.detectedItems.length > 0) {
+      listEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [analysisResult?.detectedItems?.length]);
 
   const loadHistory = () => {
     const state = db.getState();
@@ -38,8 +71,12 @@ export const FoodLogger: React.FC = () => {
     const reader = new FileReader();
     reader.onloadend = async () => {
       const rawBase64 = reader.result as string;
-      setImagePreview(rawBase64);
-      const dataPayload = rawBase64.split(',')[1];
+      
+      // Compress immediately before processing/storing
+      const compressed = await compressImage(rawBase64);
+      setImagePreview(compressed);
+      
+      const dataPayload = compressed.split(',')[1];
       
       if (action === 'simulate') runSimulation(dataPayload);
       else if (action === 'scan') processGroceryScan(dataPayload);
@@ -51,7 +88,6 @@ export const FoodLogger: React.FC = () => {
   const processImage = async (base64: string) => {
     setIsAnalyzing(true);
     setSimulationResult(null); 
-    setConfirmedIndices(new Set()); 
     setEditingLogId(null);
     setMode('meal');
     const user = db.getState().user;
@@ -66,6 +102,47 @@ export const FoodLogger: React.FC = () => {
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  const handleManualItemAdd = async () => {
+      const itemToEnrich = manualAddInput.trim();
+      if (!itemToEnrich) return;
+      
+      setIsEnrichingManual(true);
+      setManualAddInput(''); 
+
+      const user = db.getState().user;
+      if (!user) return;
+
+      try {
+          const enrichedItem = await enrichManualFoodItem(itemToEnrich, user);
+          // Use functional state update to prevent losing items when adding quickly
+          setAnalysisResult(prev => {
+              const currentItems = prev?.detectedItems || [];
+              return {
+                  ...prev,
+                  detectedItems: [...currentItems, enrichedItem],
+                  timestamp: prev?.timestamp || new Date().toISOString()
+              };
+          });
+      } catch (err) {
+          console.error(err);
+          const genericItem: FoodItem = {
+              name: itemToEnrich,
+              category: 'Other',
+              ingredients: [],
+              confidence: 1,
+              reasoning: 'Manually added by user.',
+              nutrition: { calories: 0, protein: 0, carbs: 0, fat: 0 }
+          };
+          setAnalysisResult(prev => ({
+              ...prev,
+              detectedItems: [...(prev?.detectedItems || []), genericItem],
+              timestamp: prev?.timestamp || new Date().toISOString()
+          }));
+      } finally {
+          setIsEnrichingManual(false);
+      }
   };
 
   const processGroceryScan = async (base64: string) => {
@@ -121,13 +198,22 @@ export const FoodLogger: React.FC = () => {
   };
 
   const removeItem = (index: number) => {
-    if (!analysisResult?.detectedItems) return;
-    const newItems = analysisResult.detectedItems.filter((_, i) => i !== index);
-    setAnalysisResult({ ...analysisResult, detectedItems: newItems });
+    setAnalysisResult(prev => {
+        if (!prev?.detectedItems) return prev;
+        return {
+            ...prev,
+            detectedItems: prev.detectedItems.filter((_, i) => i !== index)
+        };
+    });
   };
 
-  const handleSave = () => {
-    if (!analysisResult?.detectedItems?.length) return;
+  const handleSave = async () => {
+    if (!analysisResult?.detectedItems?.length || isEnrichingManual) return;
+    setIsSavingStatus(true);
+    
+    // Minimal UI delay for perceived performance
+    await new Promise(r => setTimeout(r, 400));
+
     const log: FoodLog = {
       id: editingLogId || crypto.randomUUID(),
       timestamp: new Date().toISOString(),
@@ -135,10 +221,20 @@ export const FoodLogger: React.FC = () => {
       detectedItems: analysisResult.detectedItems as FoodItem[],
       isGroceryScan: mode === 'grocery'
     };
-    if (editingLogId) db.updateFoodLog(log);
-    else db.addFoodLog(log);
-    resetForm();
-    loadHistory();
+    
+    let success = false;
+    if (editingLogId) success = db.updateFoodLog(log);
+    else success = db.addFoodLog(log);
+    
+    if (success) {
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 2000);
+        resetForm();
+        loadHistory();
+    } else {
+        alert("SAVE FAILED: Your storage is full. Please go to Settings and purge old data.");
+    }
+    setIsSavingStatus(false);
   };
 
   const resetForm = () => {
@@ -148,13 +244,18 @@ export const FoodLogger: React.FC = () => {
     setIsAnalyzing(false);
     setIsSimulating(false);
     setEditingLogId(null);
+    setManualAddInput('');
+  };
+
+  const calculateTotalCalories = () => {
+      if (!analysisResult?.detectedItems) return 0;
+      return analysisResult.detectedItems.reduce((acc, item) => acc + (item.nutrition?.calories || 0), 0);
   };
 
   const getMealVerdict = () => {
     if (!analysisResult?.detectedItems || analysisResult.detectedItems.length === 0) return null;
     const items = analysisResult.detectedItems;
     
-    // Check ingredient levels
     let maxLevel = 'low';
     items.forEach(item => {
         if (item.sensitivityAlert?.level === 'high') maxLevel = 'high';
@@ -176,18 +277,18 @@ export const FoodLogger: React.FC = () => {
     
     return (
       <div className="mt-4 space-y-4">
-        {/* The surgical list of what was actually found */}
         <div className="space-y-2">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-1">
-                <FlaskConical className="w-3 h-3" /> Detected Component Analysis
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
+                <span className="flex items-center gap-1"><FlaskConical className="w-3 h-3" /> Component Analysis</span>
+                {item.nutrition?.calories !== undefined && <span className="text-teal-600 flex items-center gap-0.5"><Zap className="w-3 h-3" /> {item.nutrition.calories} kcal</span>}
             </h4>
             <div className="flex flex-wrap gap-1.5">
               {analysis.length > 0 ? (
                   analysis.map((ing, i) => (
                     <div key={i} className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold flex flex-col gap-0.5 shadow-sm transition-all ${
-                        ing.safetyLevel === 'high' ? 'bg-rose-50 border-rose-200 text-rose-700 shadow-rose-100' :
-                        ing.safetyLevel === 'medium' ? 'bg-amber-50 border-amber-200 text-amber-700 shadow-amber-100' :
-                        'bg-emerald-50 border-emerald-100 text-emerald-700 shadow-emerald-50'
+                        ing.safetyLevel === 'high' ? 'bg-rose-50 border-rose-200 text-rose-700' :
+                        ing.safetyLevel === 'medium' ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                        'bg-emerald-50 border-emerald-100 text-emerald-700'
                     }`}>
                       <span className="flex items-center gap-1">
                           {ing.safetyLevel === 'high' && <X className="w-3 h-3" />}
@@ -195,7 +296,6 @@ export const FoodLogger: React.FC = () => {
                           {ing.safetyLevel === 'safe' && <Check className="w-3 h-3" />}
                           {ing.name}
                       </span>
-                      {ing.reason && <span className="opacity-70 font-medium text-[9px] leading-tight">{ing.reason}</span>}
                     </div>
                   ))
               ) : (
@@ -206,7 +306,27 @@ export const FoodLogger: React.FC = () => {
             </div>
         </div>
 
-        {/* The overall reasoning for the item */}
+        {item.nutrition && (
+            <div className="grid grid-cols-4 gap-2 text-[10px] font-bold">
+                <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-center">
+                    <p className="text-slate-400 uppercase mb-0.5">Prot</p>
+                    <p className="text-slate-700">{item.nutrition.protein || 0}g</p>
+                </div>
+                <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-center">
+                    <p className="text-slate-400 uppercase mb-0.5">Carb</p>
+                    <p className="text-slate-700">{item.nutrition.carbs || 0}g</p>
+                </div>
+                <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 text-center">
+                    <p className="text-slate-400 uppercase mb-0.5">Fat</p>
+                    <p className="text-slate-700">{item.nutrition.fat || 0}g</p>
+                </div>
+                <div className="bg-teal-50 p-2 rounded-lg border border-teal-100 text-center">
+                    <p className="text-teal-500 uppercase mb-0.5">Kcal</p>
+                    <p className="text-teal-700">{item.nutrition.calories || 0}</p>
+                </div>
+            </div>
+        )}
+
         <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
             <h5 className="text-[10px] font-bold text-slate-400 uppercase mb-1">AI Reasoning</h5>
             <p className="text-xs text-slate-600 font-medium leading-relaxed">{item.reasoning}</p>
@@ -223,39 +343,35 @@ export const FoodLogger: React.FC = () => {
                 <Loader2 className="w-20 h-20 text-teal-500 animate-spin relative z-10" />
                 <Sparkles className="w-8 h-8 text-purple-500 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
             </div>
-            <h2 className="text-2xl font-black text-slate-800 tracking-tight">Dismantling Meal...</h2>
-            <p className="text-slate-400 text-sm mt-3 font-medium text-center px-8">Identifying constituent ingredients and checking for biological triggers.</p>
+            <h2 className="text-2xl font-black text-slate-800 tracking-tight">Neural Dismantling...</h2>
+            <p className="text-slate-400 text-sm mt-3 font-medium text-center px-8">Extracting biological data from your meal input.</p>
         </div>
     );
   }
 
-  if (analysisResult) {
+  if (analysisResult || isEnrichingManual) {
     const verdict = getMealVerdict();
-    const items = analysisResult.detectedItems || [];
-
-    if (items.length === 0) {
-        return (
-            <div className="flex flex-col items-center justify-center py-20 animate-in fade-in duration-300">
-                <div className="bg-slate-100 p-6 rounded-full mb-6">
-                    <SearchX className="w-12 h-12 text-slate-400" />
-                </div>
-                <h2 className="text-xl font-bold text-slate-800">Scan Inconclusive</h2>
-                <p className="text-slate-500 text-center px-10 mt-2 text-sm leading-relaxed">
-                    The AI couldn't clearly identify ingredients. Please try taking a photo with better lighting or enter the meal details manually.
-                </p>
-                <button onClick={resetForm} className="mt-8 bg-slate-900 text-white px-8 py-3 rounded-xl font-bold">Try Again</button>
-            </div>
-        );
-    }
+    const items = analysisResult?.detectedItems || [];
+    const totalCals = calculateTotalCalories();
 
     return (
       <div className="space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-300">
         <div className="flex items-center justify-between">
-            <h2 className="text-2xl font-black text-slate-800">Meal Analysis</h2>
+            <div>
+                <h2 className="text-2xl font-black text-slate-800">Meal Analysis</h2>
+                {totalCals > 0 && <p className="text-teal-600 text-xs font-black uppercase tracking-widest mt-0.5 flex items-center gap-1"><Zap className="w-3 h-3" /> {totalCals} Total Calories</p>}
+            </div>
             <button onClick={resetForm} className="p-2 bg-slate-100 rounded-full text-slate-500"><X className="w-5 h-5" /></button>
         </div>
 
-        {verdict && (
+        {saveSuccess && (
+            <div className="bg-emerald-500 text-white p-4 rounded-2xl flex items-center gap-3 animate-in zoom-in duration-300">
+                <CheckCircle className="w-6 h-6" />
+                <span className="font-bold">Bio-Log Committed Successfully!</span>
+            </div>
+        )}
+
+        {verdict && items.length > 0 && (
             <div className={`${verdict.color} text-white p-5 rounded-3xl shadow-xl shadow-slate-200 flex items-center justify-between relative overflow-hidden`}>
                 <div className="absolute right-0 top-0 w-32 h-32 bg-white/10 rounded-full -mr-16 -mt-16 blur-2xl"></div>
                 <div className="flex items-center gap-4 relative z-10">
@@ -276,10 +392,10 @@ export const FoodLogger: React.FC = () => {
 
         <div className="space-y-5">
           {items.map((item, idx) => (
-             <div key={idx} className={`bg-white p-6 rounded-3xl shadow-sm border-2 transition-all ${
+             <div key={`${idx}-${item.name}`} className={`bg-white p-6 rounded-3xl shadow-sm border-2 transition-all animate-in slide-in-from-right-4 duration-300 ${
                  item.sensitivityAlert?.level === 'high' || item.ingredientAnalysis?.some(i => i.safetyLevel === 'high') ? 'border-rose-200 bg-rose-50/10' : 
                  item.sensitivityAlert?.level === 'medium' || item.ingredientAnalysis?.some(i => i.safetyLevel === 'medium') ? 'border-amber-200 bg-amber-50/10' : 
-                 'border-slate-100'
+                 'border-slate-100 shadow-slate-200/50'
              }`}>
                 <div className="flex justify-between items-start mb-4">
                     <div>
@@ -290,18 +406,56 @@ export const FoodLogger: React.FC = () => {
                             <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest">{item.ingredients?.length || 0} Components</span>
                         </div>
                     </div>
+                    <button onClick={() => removeItem(idx)} className="p-2 hover:bg-rose-100 hover:text-rose-600 rounded-xl transition-colors text-slate-300">
+                        <Trash2 className="w-5 h-5" />
+                    </button>
                 </div>
                 
                 {renderIngredientAnalysis(item as FoodItem)}
-
-                <div className="flex gap-2 mt-6">
-                    <button onClick={() => removeItem(idx)} className="flex-1 py-3 bg-slate-50 text-slate-400 rounded-2xl text-[10px] font-black uppercase tracking-widest border border-slate-100 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 transition-all">Discard Item</button>
-                </div>
              </div>
           ))}
+
+          <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2rem] p-6 shadow-sm">
+              <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                  <ListPlus className="w-4 h-4" /> Add Missing Ingredient
+              </h3>
+              <div className="flex gap-2">
+                   <input 
+                      type="text" 
+                      placeholder="e.g. Avocado, Whole Milk..." 
+                      className="flex-1 bg-slate-50 border border-slate-200 p-4 rounded-2xl outline-none text-sm font-bold text-black placeholder:text-slate-400 focus:ring-2 focus:ring-teal-500/20" 
+                      value={manualAddInput}
+                      onChange={(e) => setManualAddInput(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleManualItemAdd()}
+                      disabled={isEnrichingManual}
+                   />
+                   <button 
+                      onClick={handleManualItemAdd}
+                      disabled={!manualAddInput.trim() || isEnrichingManual}
+                      className="bg-slate-900 text-white px-6 rounded-2xl shadow-lg disabled:opacity-50 active:scale-95 transition-all"
+                   >
+                       {isEnrichingManual ? <Loader2 className="w-6 h-6 animate-spin" /> : <Plus className="w-6 h-6" />}
+                   </button>
+              </div>
+              {isEnrichingManual && (
+                  <p className="text-[10px] text-teal-600 mt-2 font-black animate-pulse flex items-center gap-2">
+                      <Sparkles className="w-3 h-3" /> Analyzing Biological Markers...
+                  </p>
+              )}
+          </div>
+          <div ref={listEndRef} />
         </div>
         
-        <button onClick={handleSave} className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black text-xl shadow-2xl shadow-slate-300 transform active:scale-95 transition-all">Archive Log & Bio-Twin</button>
+        <button 
+            onClick={handleSave} 
+            disabled={isSavingStatus || items.length === 0 || isEnrichingManual}
+            className={`w-full py-5 rounded-3xl font-black text-xl shadow-2xl transition-all flex items-center justify-center gap-3 ${
+                isSavingStatus || items.length === 0 || isEnrichingManual ? 'bg-slate-100 text-slate-400 cursor-not-allowed opacity-50' : 'bg-slate-900 text-white shadow-slate-300 hover:bg-slate-800 active:scale-95'
+            }`}
+        >
+            {isSavingStatus ? <Loader2 className="w-6 h-6 animate-spin" /> : <Save className="w-6 h-6" />}
+            {isSavingStatus ? 'Committing Log...' : 'Save to Food Log'}
+        </button>
       </div>
     );
   }
@@ -333,11 +487,18 @@ export const FoodLogger: React.FC = () => {
             />
             <button onClick={() => handleTextAnalysis(textInput)} className="p-4 bg-slate-900 text-white rounded-[1.2rem] shadow-lg shadow-slate-200 transform active:scale-95 transition-all"><ArrowRight className="w-5 h-5" /></button>
         </div>
+        
+        <button 
+           onClick={() => setAnalysisResult({ detectedItems: [], timestamp: new Date().toISOString() })}
+           className="w-full bg-slate-100 border border-slate-200 text-slate-600 py-4 rounded-3xl font-bold flex items-center justify-center gap-2 hover:bg-slate-200 transition-all"
+        >
+            <Plus className="w-5 h-5" /> Start Empty Log
+        </button>
       </div>
       
       <div className="space-y-5">
         <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
-            <Clock className="w-4 h-4" /> Recent History
+            <Clock className="w-4 h-4" /> Bio-History
         </h3>
         <div className="space-y-4">
           {history.length === 0 ? (
@@ -345,22 +506,28 @@ export const FoodLogger: React.FC = () => {
                   <p className="text-slate-400 text-xs font-bold">No history yet.</p>
               </div>
           ) : (
-            history.slice(0, 10).map((log) => (
-                <div key={log.id} onClick={() => startEdit(log)} className="bg-white rounded-3xl p-4 shadow-sm border border-slate-100 flex gap-4 cursor-pointer hover:border-teal-200 hover:shadow-md transition-all group">
-                   <div className="w-20 h-20 bg-slate-100 rounded-2xl overflow-hidden flex-shrink-0 border border-slate-50">
-                      {log.imageUrl ? <img src={log.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" /> : <Utensils className="w-8 h-8 m-auto text-slate-300" />}
-                   </div>
-                   <div className="flex-1 py-1">
-                      <h4 className="font-black text-slate-800 text-base leading-tight">{(log.detectedItems || []).map(i => i.name).join(', ')}</h4>
-                      <p className="text-[10px] text-slate-400 mt-2 font-bold uppercase tracking-wider">{new Date(log.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
-                      <div className="flex gap-1.5 mt-2">
-                          {log.detectedItems?.slice(0, 3).map((item, i) => (
-                              <span key={i} className={`w-1.5 h-1.5 rounded-full ${item.sensitivityAlert?.level === 'high' ? 'bg-rose-500' : item.sensitivityAlert?.level === 'medium' ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
-                          ))}
-                      </div>
-                   </div>
-                </div>
-              ))
+            history.map((log) => {
+                const totalCals = log.detectedItems?.reduce((acc, item) => acc + (item.nutrition?.calories || 0), 0);
+                return (
+                    <div key={log.id} onClick={() => startEdit(log)} className="bg-white rounded-3xl p-4 shadow-sm border border-slate-100 flex gap-4 cursor-pointer hover:border-teal-200 hover:shadow-md transition-all group">
+                    <div className="w-20 h-20 bg-slate-100 rounded-2xl overflow-hidden flex-shrink-0 border border-slate-50">
+                        {log.imageUrl ? <img src={log.imageUrl} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" /> : <Utensils className="w-8 h-8 m-auto text-slate-300" />}
+                    </div>
+                    <div className="flex-1 py-1">
+                        <div className="flex justify-between items-start">
+                            <h4 className="font-black text-slate-800 text-base leading-tight">{(log.detectedItems || []).map(i => i.name).join(', ')}</h4>
+                            {totalCals > 0 && <span className="text-[10px] font-black text-teal-600 bg-teal-50 px-1.5 py-0.5 rounded ml-2 whitespace-nowrap">{totalCals} cal</span>}
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-2 font-bold uppercase tracking-wider">{new Date(log.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</p>
+                        <div className="flex gap-1.5 mt-2">
+                            {log.detectedItems?.slice(0, 3).map((item, i) => (
+                                <span key={`${log.id}-${i}`} className={`w-1.5 h-1.5 rounded-full ${item.sensitivityAlert?.level === 'high' ? 'bg-rose-500' : item.sensitivityAlert?.level === 'medium' ? 'bg-amber-500' : 'bg-emerald-500'}`}></span>
+                            ))}
+                        </div>
+                    </div>
+                    </div>
+                );
+              })
           )}
         </div>
       </div>

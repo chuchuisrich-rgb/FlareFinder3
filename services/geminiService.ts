@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { AppState, FoodLog, BehaviorLog, Reminder, UserProfile, DeepAnalysis, MarketplaceProduct, SimulationResult, GlobalInsight, FoodSensitivity, FlareDetectiveReport, LabReport, Recipe, DayPlan, Biomarker, MenuAnalysis } from "../types";
+import { AppState, FoodLog, BehaviorLog, Reminder, UserProfile, DeepAnalysis, MarketplaceProduct, SimulationResult, GlobalInsight, FoodSensitivity, FlareDetectiveReport, LabReport, Recipe, DayPlan, Biomarker, MenuAnalysis, FoodItem } from "../types";
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist';
 
@@ -79,10 +79,9 @@ async function withRetry<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
     } catch (err: any) {
       lastError = err;
       const status = err?.status || err?.error?.status;
-      // Retry with exponential backoff on server errors or quota
       if (status === 500 || status === 503 || status === 429) {
         if (i < maxRetries - 1) {
-          const wait = Math.pow(3, i + 1) * 1000; // 3s, 9s...
+          const wait = Math.pow(3, i + 1) * 1000; 
           console.warn(`[Neural Engine] API Busy. Retrying in ${wait}ms...`);
           await delay(wait);
           continue;
@@ -138,11 +137,101 @@ export const analyzeFoodImage = async (base64Image: string, mimeType: string = "
   return smartExecute(PRO_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Decompose meal for ${user?.condition}. JSON with detectedItems.` }] },
-        config: { responseMimeType: "application/json" }
+        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Analyze this image for a user with ${user?.condition}. Decompose the meal into constituent items. Provide nutritional data including calories for EVERY item. Return JSON.` }] },
+        config: { 
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                required: ["detectedItems"],
+                properties: {
+                    detectedItems: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            required: ["name", "category", "ingredients", "reasoning", "nutrition"],
+                            properties: {
+                                name: { type: Type.STRING },
+                                category: { type: Type.STRING, description: "e.g., Dairy, Nightshade, Protein, etc." },
+                                ingredients: { type: Type.ARRAY, items: { type: Type.STRING } },
+                                reasoning: { type: Type.STRING },
+                                nutrition: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        calories: { type: Type.NUMBER },
+                                        protein: { type: Type.NUMBER },
+                                        carbs: { type: Type.NUMBER },
+                                        fat: { type: Type.NUMBER }
+                                    }
+                                },
+                                ingredientAnalysis: {
+                                    type: Type.ARRAY,
+                                    items: {
+                                        type: Type.OBJECT,
+                                        properties: {
+                                            name: { type: Type.STRING },
+                                            safetyLevel: { type: Type.STRING, description: "high, medium, or safe" },
+                                            reason: { type: Type.STRING }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     });
     const result = safeJsonParse(response.text);
     if (!result) throw new Error("Invalid Analysis JSON");
+    return result;
+  });
+};
+
+export const enrichManualFoodItem = async (foodName: string, user: UserProfile): Promise<FoodItem> => {
+  const ai = getAiClient();
+  if (!ai) throw new Error("AI Offline");
+
+  return smartExecute(PRO_MODEL, async (model) => {
+    const response = await ai.models.generateContent({
+        model: model,
+        contents: `Provide biological analysis for food: "${foodName}" for a person with ${user.condition}. 
+        Return full JSON mapping of ingredients, reasoning for safety, and nutritional content.`,
+        config: { 
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                required: ["name", "category", "ingredients", "reasoning", "nutrition"],
+                properties: {
+                    name: { type: Type.STRING },
+                    category: { type: Type.STRING },
+                    ingredients: { type: Type.ARRAY, items: { type: Type.STRING } },
+                    reasoning: { type: Type.STRING },
+                    nutrition: {
+                        type: Type.OBJECT,
+                        properties: {
+                            calories: { type: Type.NUMBER },
+                            protein: { type: Type.NUMBER },
+                            carbs: { type: Type.NUMBER },
+                            fat: { type: Type.NUMBER }
+                        }
+                    },
+                    ingredientAnalysis: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                name: { type: Type.STRING },
+                                safetyLevel: { type: Type.STRING },
+                                reason: { type: Type.STRING }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+    const result = safeJsonParse(response.text);
+    if (!result) throw new Error("Invalid Enrichment JSON");
     return result;
   });
 };
@@ -204,7 +293,6 @@ export const parseLabResults = async (
   if (!ai) throw new Error("AI Offline");
 
   const processChunk = async (chunkText: string) => {
-      // Small delay before each chunk to avoid RPM burst issues
       await delay(1500);
       return await smartExecute(PRO_MODEL, async (model) => {
           const response = await ai.models.generateContent({
@@ -224,7 +312,6 @@ export const parseLabResults = async (
 
   if (mimeType === 'application/pdf') {
       const pages = await extractPdfPages(base64Data);
-      // SEQUENTIAL PROCESSING: Do not process all pages at once (avoids 429)
       for (let i = 0; i < pages.length; i++) {
           if (onProgress) onProgress(`Analyzing page ${i+1}/${pages.length}...`);
           try {
@@ -254,7 +341,6 @@ export const parseLabResults = async (
   };
 };
 
-// ... keep other exports identical ...
 export const chatWithCoach = async (message: string, state: AppState): Promise<{reply: string, suggestions: string[], richContent?: any}> => {
   const ai = getAiClient();
   if (!ai) return { reply: "AI Offline.", suggestions: [] };
@@ -304,8 +390,32 @@ export const scanGroceryProduct = async (base64Image: string, mimeType: string =
   return smartExecute(PRO_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Grocery Scan. JSON.` }] },
-        config: { responseMimeType: "application/json" }
+        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Analyze grocery product for ${user?.condition}. JSON.` }] },
+        config: { 
+            responseMimeType: "application/json",
+            responseSchema: {
+                type: Type.OBJECT,
+                required: ["detectedItems"],
+                properties: {
+                    detectedItems: {
+                        type: Type.ARRAY,
+                        items: {
+                            type: Type.OBJECT,
+                            properties: {
+                                name: { type: Type.STRING },
+                                category: { type: Type.STRING },
+                                nutrition: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        calories: { type: Type.NUMBER }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     });
     const result = safeJsonParse(response.text);
     if (!result) throw new Error("Invalid Scan JSON");
@@ -375,7 +485,7 @@ export const processVoiceCommand = async (text: string, user?: UserProfile | nul
   try {
     const response = await ai.models.generateContent({
         model: FLASH_MODEL,
-        contents: `Logs from: "${text}". JSON.`,
+        contents: `Logs from: "${text}". JSON.` ,
         config: { responseMimeType: "application/json" }
     });
     return safeJsonParse(response.text) || { foodLogs: [], behaviorLogs: [] };

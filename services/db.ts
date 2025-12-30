@@ -20,33 +20,29 @@ export const db = {
       const stored = localStorage.getItem(STORAGE_KEY);
       return stored ? JSON.parse(stored) : initialDb;
     } catch (e) {
-      console.error("Failed to load DB - possibly corrupt or quota exceeded. Resetting.", e);
-      try {
-          localStorage.removeItem(STORAGE_KEY);
-      } catch(resetErr) {
-          console.error("Could not reset DB", resetErr);
-      }
+      console.error("Failed to load DB", e);
       return initialDb;
     }
   },
 
-  saveState: (state: AppState) => {
+  saveState: (state: AppState): boolean => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      return true;
     } catch (e) {
       console.error("Failed to save DB", e);
       // @ts-ignore
       if (e.name === 'QuotaExceededError' || e.code === 22) {
-          alert("Storage full! Please delete some old food logs or history to make space.");
+          alert("CRITICAL: Browser Storage Full! Your meal history is too large. Please delete some old logs with photos to make space for new ones.");
       }
+      return false;
     }
   },
 
   updateUser: (user: UserProfile) => {
     const state = db.getState();
     state.user = user;
-    db.saveState(state);
-    return user;
+    return db.saveState(state);
   },
 
   updateUserSensitivities: (sensitivities: FoodSensitivity[]) => {
@@ -60,8 +56,9 @@ export const db = {
         });
         
         state.user.foodSensitivities = Array.from(existingMap.values());
-        db.saveState(state);
+        return db.saveState(state);
     }
+    return false;
   },
 
   getSensitivities: (): FoodSensitivity[] => {
@@ -76,72 +73,63 @@ export const db = {
           if (report.extractedBiomarkers) {
              state.biomarkers = [...(state.biomarkers || []), ...report.extractedBiomarkers];
           }
-          db.saveState(state);
+          return db.saveState(state);
       }
+      return false;
   },
 
-  getLabReports: (): LabReport[] => {
-      const state = db.getState();
-      return state.user?.labReports || [];
-  },
-
-  addFoodLog: (log: FoodLog) => {
+  addFoodLog: (log: FoodLog): boolean => {
     const state = db.getState();
     state.foodLogs = [log, ...state.foodLogs];
-    db.saveState(state);
-    return log;
+    return db.saveState(state);
   },
 
-  updateFoodLog: (log: FoodLog) => {
+  updateFoodLog: (log: FoodLog): boolean => {
     const state = db.getState();
     state.foodLogs = state.foodLogs.map(l => l.id === log.id ? log : l);
-    db.saveState(state);
-    return log;
+    return db.saveState(state);
   },
 
   deleteFoodLog: (id: string) => {
     const state = db.getState();
     state.foodLogs = state.foodLogs.filter(l => l.id !== id);
-    db.saveState(state);
+    return db.saveState(state);
   },
 
   addFlareLog: (log: FlareLog) => {
     const state = db.getState();
     state.flareLogs = [log, ...state.flareLogs];
-    db.saveState(state);
-    return log;
+    return db.saveState(state);
   },
 
   addBehaviorLog: (log: BehaviorLog) => {
     const state = db.getState();
     state.behaviorLogs = [log, ...state.behaviorLogs];
-    db.saveState(state);
-    return log;
+    return db.saveState(state);
   },
 
   saveAnalysis: (analysis: DeepAnalysis) => {
     const state = db.getState();
     state.currentAnalysis = analysis;
-    db.saveState(state);
-    return analysis;
+    return db.saveState(state);
   },
 
   saveFlareDetectiveReport: (report: FlareDetectiveReport) => {
       const state = db.getState();
       state.flareDetectiveReports = [report, ...(state.flareDetectiveReports || [])];
-      db.saveState(state);
+      return db.saveState(state);
   },
 
   addToShoppingList: (item: ShoppingListItem) => {
     const state = db.getState();
     state.shoppingList = [item, ...(state.shoppingList || [])];
-    db.saveState(state);
+    return db.saveState(state);
   },
 
   removeFromShoppingList: (id: string) => {
     const state = db.getState();
     state.shoppingList = (state.shoppingList || []).filter(i => i.id !== id);
-    db.saveState(state);
+    return db.saveState(state);
   },
   
   toggleShoppingItem: (id: string) => {
@@ -151,14 +139,15 @@ export const db = {
     if (idx > -1) {
         list[idx].status = list[idx].status === 'bought' ? 'pending' : 'bought';
         state.shoppingList = list;
-        db.saveState(state);
+        return db.saveState(state);
     }
+    return false;
   },
   
   addBiomarkers: (biomarkers: Biomarker[]) => {
       const state = db.getState();
       state.biomarkers = [...(state.biomarkers || []), ...biomarkers];
-      db.saveState(state);
+      return db.saveState(state);
   },
 
   exportData: () => {
@@ -175,7 +164,6 @@ export const db = {
   importData: (jsonData: string): boolean => {
     try {
       const parsed = JSON.parse(jsonData);
-      // Basic validation: check for user or at least one known array
       if (parsed && (parsed.user || Array.isArray(parsed.foodLogs))) {
         db.saveState(parsed);
         return true;
