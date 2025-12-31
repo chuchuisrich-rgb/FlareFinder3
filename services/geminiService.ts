@@ -58,6 +58,17 @@ const prepareLogsForAi = (logs: any[]) => {
     });
 };
 
+const getSensitivitiesPrompt = (user?: UserProfile | null) => {
+    if (!user?.foodSensitivities || user.foodSensitivities.length === 0) return "";
+    const list = user.foodSensitivities.map(s => `${s.food} (${s.level} sensitivity)`).join(', ');
+    return `CRITICAL INSTRUCTION: The user has documented CLINICAL sensitivities from their medical lab reports for the following items: ${list}. 
+    
+    You MUST check EVERY ingredient in the logged food against this specific list. 
+    - If an ingredient matches an item on the list, you MUST flag it in the 'sensitivityAlert' field.
+    - Clinical lab results (the list above) take ABSOLUTE precedence over general nutritional advice. 
+    - Even if a food is generally considered healthy, if it is on the user's sensitivity list, you MUST flag it as a risk.`;
+};
+
 async function smartExecute<T>(
     preferredModel: string, 
     task: (model: string) => Promise<T>
@@ -123,7 +134,6 @@ const safeJsonParse = (text: string | undefined | null) => {
 
 const extractPdfPages = async (base64Data: string): Promise<string[]> => {
     try {
-        // Initialize worker only when needed to prevent blocking
         if (typeof window !== 'undefined' && pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
             const WORKER_VERSION = '4.0.379';
             pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${WORKER_VERSION}/build/pdf.worker.min.mjs`;
@@ -216,10 +226,12 @@ export const analyzeFoodImage = async (base64Image: string, mimeType: string = "
   const ai = getAiClient();
   if (!ai) throw new Error("AI Offline");
 
+  const sensitivityContext = getSensitivitiesPrompt(user);
+
   return smartExecute(PRO_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Analyze this meal image for a user with ${user?.condition}. Break down into items with full nutrition.` }] },
+        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Analyze this meal image for a user with ${user?.condition}. ${sensitivityContext} Break down into items with full nutrition and specific clinical warnings.` }] },
         config: { 
             responseMimeType: "application/json",
             responseSchema: {
@@ -243,6 +255,14 @@ export const analyzeFoodImage = async (base64Image: string, mimeType: string = "
                                         protein: { type: Type.NUMBER },
                                         carbs: { type: Type.NUMBER },
                                         fat: { type: Type.NUMBER }
+                                    }
+                                },
+                                sensitivityAlert: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        level: { type: Type.STRING },
+                                        triggerIngredient: { type: Type.STRING },
+                                        message: { type: Type.STRING }
                                     }
                                 },
                                 ingredientAnalysis: {
@@ -273,10 +293,12 @@ export const enrichManualFoodItem = async (foodName: string, user: UserProfile):
   const ai = getAiClient();
   if (!ai) throw new Error("AI Offline");
 
+  const sensitivityContext = getSensitivitiesPrompt(user);
+
   return smartExecute(PRO_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: `Biological analysis for: "${foodName}" for a person with ${user.condition}. JSON.`,
+        contents: `Biological analysis for: "${foodName}" for a person with ${user.condition}. ${sensitivityContext} Return full nutrition and clinical warnings. JSON.`,
         config: { 
             responseMimeType: "application/json",
             responseSchema: {
@@ -294,6 +316,14 @@ export const enrichManualFoodItem = async (foodName: string, user: UserProfile):
                             protein: { type: Type.NUMBER },
                             carbs: { type: Type.NUMBER },
                             fat: { type: Type.NUMBER }
+                        }
+                    },
+                    sensitivityAlert: {
+                        type: Type.OBJECT,
+                        properties: {
+                            level: { type: Type.STRING },
+                            triggerIngredient: { type: Type.STRING },
+                            message: { type: Type.STRING }
                         }
                     }
                 }
@@ -396,10 +426,12 @@ export const runFlareDetective = async (state: AppState): Promise<FlareDetective
 export const scanGroceryProduct = async (base64Image: string, mimeType: string = "image/jpeg", user?: UserProfile | null): Promise<Partial<FoodLog>> => {
   const ai = getAiClient();
   if (!ai) throw new Error("AI Offline");
+  const sensitivityContext = getSensitivitiesPrompt(user);
+
   return smartExecute(PRO_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Grocery scan for ${user?.condition}. Safety check. JSON.` }] },
+        contents: { parts: [{ inlineData: { mimeType, data: base64Image } }, { text: `Grocery scan for ${user?.condition}. ${sensitivityContext} Safety check. JSON.` }] },
         config: { 
             responseMimeType: "application/json",
             responseSchema: {
@@ -413,6 +445,14 @@ export const scanGroceryProduct = async (base64Image: string, mimeType: string =
                             properties: {
                                 name: { type: Type.STRING },
                                 category: { type: Type.STRING },
+                                sensitivityAlert: {
+                                    type: Type.OBJECT,
+                                    properties: {
+                                        level: { type: Type.STRING },
+                                        triggerIngredient: { type: Type.STRING },
+                                        message: { type: Type.STRING }
+                                    }
+                                },
                                 nutrition: {
                                     type: Type.OBJECT,
                                     properties: {
@@ -491,11 +531,13 @@ export const getGlobalInsights = async (condition: string): Promise<GlobalInsigh
 export const processVoiceCommand = async (text: string, user?: UserProfile | null): Promise<{ foodLogs: Partial<FoodLog>[], behaviorLogs: Partial<BehaviorLog>[] }> => {
   const ai = getAiClient();
   if (!ai) throw new Error("AI Offline");
+
+  const sensitivityContext = getSensitivitiesPrompt(user);
   
   return smartExecute(FLASH_MODEL, async (model) => {
     const response = await ai.models.generateContent({
         model: model,
-        contents: `The user says: "${text}". Extract any food mentioned and convert to a food log. For each food item, include nutrition data (calories, protein, carbs, fat) and analyze if it triggers ${user?.condition}. Return a JSON object with 'foodLogs' and 'behaviorLogs' keys.`,
+        contents: `The user says: "${text}". Extract any food mentioned and convert to a food log. For each food item, include nutrition data (calories, protein, carbs, fat) and analyze if it triggers ${user?.condition}. ${sensitivityContext} Return a JSON object with 'foodLogs' and 'behaviorLogs' keys.`,
         config: { 
             responseMimeType: "application/json",
             responseSchema: {
@@ -525,6 +567,14 @@ export const processVoiceCommand = async (text: string, user?: UserProfile | nul
                                                     protein: { type: Type.NUMBER },
                                                     carbs: { type: Type.NUMBER },
                                                     fat: { type: Type.NUMBER }
+                                                }
+                                            },
+                                            sensitivityAlert: {
+                                                type: Type.OBJECT,
+                                                properties: {
+                                                    level: { type: Type.STRING },
+                                                    triggerIngredient: { type: Type.STRING },
+                                                    message: { type: Type.STRING }
                                                 }
                                             }
                                         }

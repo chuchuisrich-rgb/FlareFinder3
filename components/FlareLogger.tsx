@@ -163,31 +163,33 @@ export const FlareLogger: React.FC = () => {
               </div>
           ) : (
             history.map((log) => (
-                <div key={log.id} className="bg-white rounded-[2.5rem] p-6 border border-slate-100 relative group overflow-visible shadow-sm hover:shadow-md transition-all">
-                  <button 
-                    type="button"
-                    onClick={(e) => handleDeleteLog(e, log.id)} 
-                    className="absolute top-6 right-6 p-3 bg-rose-50 text-rose-500 rounded-2xl hover:bg-rose-500 hover:text-white transition-all z-[60] shadow-sm active:scale-90"
-                    title="Delete Record"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                  <div className="pr-14">
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className={`px-3 py-1 rounded-full text-[11px] font-black text-white ${getSeverityColor(log.severity)}`}>SEVERITY {log.severity}</span>
-                      {log.weather && <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2.5 py-1 rounded-full">{Math.round(log.weather.temperature)}°F • {log.weather.humidity}% Humidity</span>}
-                    </div>
-                    <h4 className="font-black text-slate-800 text-lg leading-tight">{log.locations?.length ? log.locations.join(', ') : log.location}</h4>
-                    <p className="text-[10px] text-slate-400 font-bold uppercase mt-1.5 flex items-center gap-1.5">
-                        <Clock className="w-3 h-3" />
-                        {new Date(log.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    </p>
-                    {log.notes && (
-                        <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
-                             <p className="text-xs text-slate-500 font-medium italic leading-relaxed">"{log.notes}"</p>
+                <div key={log.id} className="relative group overflow-visible">
+                    <div className="bg-white rounded-[2.5rem] p-6 border border-slate-100 relative shadow-sm hover:shadow-md transition-all z-10 cursor-pointer">
+                        <div className="pr-14">
+                            <div className="flex items-center gap-2 mb-3">
+                                <span className={`px-3 py-1 rounded-full text-[11px] font-black text-white ${getSeverityColor(log.severity)}`}>SEVERITY {log.severity}</span>
+                                {log.weather && <span className="text-[10px] font-black text-indigo-500 bg-indigo-50 px-2.5 py-1 rounded-full">{Math.round(log.weather.temperature)}°F • {log.weather.humidity}% Humidity</span>}
+                            </div>
+                            <h4 className="font-black text-slate-800 text-lg leading-tight">{log.locations?.length ? log.locations.join(', ') : log.location}</h4>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase mt-1.5 flex items-center gap-1.5">
+                                <Clock className="w-3 h-3" />
+                                {new Date(log.timestamp).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                            {log.notes && (
+                                <div className="mt-4 p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                                    <p className="text-xs text-slate-500 font-medium italic leading-relaxed">"{log.notes}"</p>
+                                </div>
+                            )}
                         </div>
-                    )}
-                  </div>
+                    </div>
+                    <button 
+                        type="button"
+                        onClick={(e) => handleDeleteLog(e, log.id)} 
+                        className="absolute top-6 right-6 p-3 bg-rose-50 text-rose-500 rounded-2xl hover:bg-rose-500 hover:text-white transition-all z-[20] shadow-sm active:scale-90"
+                        title="Delete Record"
+                    >
+                        <Trash2 className="w-5 h-5" />
+                    </button>
                 </div>
               ))
           )}

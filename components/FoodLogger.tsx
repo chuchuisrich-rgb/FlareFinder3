@@ -1,10 +1,22 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, Upload, Loader2, CheckCircle, AlertCircle, Plus, Flame, Leaf, HelpCircle, Utensils, ArrowRight, Sparkles, Clock, Calendar, Trash2, X, ThumbsUp, ThumbsDown, Check, Edit2, Keyboard, FlaskConical, AlertTriangle, ShieldCheck, ScanBarcode, ShoppingCart, ListPlus, Activity, ChefHat, Droplet, Save, ShieldAlert, Shield, SearchX, Zap, Info } from 'lucide-react';
+import { Camera, Upload, Loader2, CheckCircle, AlertCircle, Plus, Flame, Leaf, HelpCircle, Utensils, ArrowRight, Sparkles, Clock, Calendar, Trash2, X, ThumbsUp, ThumbsDown, Check, Edit2, Keyboard, FlaskConical, AlertTriangle, ShieldCheck, ScanBarcode, ShoppingCart, ListPlus, Activity, ChefHat, Droplet, Save, ShieldAlert, Shield, SearchX, Zap, Info, XCircle } from 'lucide-react';
 import { analyzeFoodImage, processVoiceCommand, simulateMealImpact, scanGroceryProduct, enrichManualFoodItem } from '../services/geminiService';
 import { db } from '../services/db';
 import { FoodLog, FoodItem, SimulationResult, ShoppingListItem } from '../types';
 import { VoiceRecorder } from './VoiceRecorder';
+
+// Helper for robust level detection
+const isHighRisk = (level?: string) => {
+    const l = level?.toLowerCase() || '';
+    return l.includes('high') || l.includes('severe') || l.includes('avoid') || l.includes('danger') || l.includes('critical') || l.includes('risk');
+};
+
+const isMediumRisk = (level?: string) => {
+    const l = level?.toLowerCase() || '';
+    if (isHighRisk(l)) return false;
+    return l.includes('medium') || l.includes('moderate') || l.includes('caution') || l.includes('limit') || l.includes('yellow');
+};
 
 const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.7): Promise<string> => {
   return new Promise((resolve) => {
@@ -202,41 +214,100 @@ export const FoodLogger: React.FC = () => {
   const getMealVerdict = () => {
     if (!analysisResult?.detectedItems || analysisResult.detectedItems.length === 0) return null;
     const items = analysisResult.detectedItems;
-    let maxLevel = 'low';
+    
+    // Strict level check logic using robust mapping
+    let highestSeverity = 'safe';
+    
     items.forEach(item => {
-        if (item.sensitivityAlert?.level === 'high') maxLevel = 'high';
-        else if (item.sensitivityAlert?.level === 'medium' && maxLevel !== 'high') maxLevel = 'medium';
+        const levelText = item.sensitivityAlert?.level;
+        if (isHighRisk(levelText)) highestSeverity = 'high';
+        else if (isMediumRisk(levelText) && highestSeverity !== 'high') highestSeverity = 'medium';
+        
         item.ingredientAnalysis?.forEach(ing => {
-            if (ing.safetyLevel === 'high') maxLevel = 'high';
-            else if (ing.safetyLevel === 'medium' && maxLevel !== 'high') maxLevel = 'medium';
+            const ingLevel = ing.safetyLevel;
+            if (isHighRisk(ingLevel)) highestSeverity = 'high';
+            else if (isMediumRisk(ingLevel) && highestSeverity !== 'high') highestSeverity = 'medium';
         });
     });
-    if (maxLevel === 'high') return { label: 'AVOID', color: 'bg-rose-600', text: 'Critical Trigger Detected', icon: <ShieldAlert className="w-5 h-5" /> };
-    if (maxLevel === 'medium') return { label: 'CAUTION', color: 'bg-amber-500', text: 'Contains Potential Triggers', icon: <AlertTriangle className="w-5 h-5" /> };
-    return { label: 'SAFE', color: 'bg-emerald-600', text: 'Safe for your condition', icon: <ShieldCheck className="w-5 h-5" /> };
+
+    if (highestSeverity === 'high') {
+      return { 
+        label: 'AVOID', 
+        color: 'bg-rose-600', 
+        text: 'Do not consume. Clinical danger detected.', 
+        icon: <XCircle className="w-7 h-7" /> 
+      };
+    }
+    
+    if (highestSeverity === 'medium') {
+      return { 
+        label: 'CAUTION', 
+        color: 'bg-amber-500', 
+        text: 'Proceed with extreme care. Triggers present.', 
+        icon: <AlertTriangle className="w-7 h-7" /> 
+      };
+    }
+
+    return { 
+      label: 'SAFE', 
+      color: 'bg-emerald-600', 
+      text: 'Compatible with clinical profile.', 
+      icon: <ShieldCheck className="w-7 h-7" /> 
+    };
   };
 
   const renderIngredientAnalysis = (item: FoodItem) => {
     const analysis = item.ingredientAnalysis || [];
+    const rawLevel = item.sensitivityAlert?.level || 'safe';
+    
+    const isHigh = isHighRisk(rawLevel) || analysis.some(ia => isHighRisk(ia.safetyLevel));
+    const isMedium = isMediumRisk(rawLevel) || analysis.some(ia => isMediumRisk(ia.safetyLevel));
+
     return (
       <div className="mt-4 space-y-4">
+        {/* Clinical sensitivity alert - specific high contrast card */}
+        {item.sensitivityAlert && (
+          <div className={`p-5 rounded-3xl border-2 shadow-md animate-in zoom-in duration-300 ${
+            isHigh ? 'bg-rose-600 text-white border-rose-700' :
+            isMedium ? 'bg-amber-500 text-white border-amber-600' :
+            'bg-emerald-600 text-white border-emerald-700'
+          }`}>
+             <div className="flex items-start gap-4">
+                {isHigh ? <ShieldAlert className="w-7 h-7 flex-shrink-0 mt-0.5" /> : 
+                 isMedium ? <AlertTriangle className="w-7 h-7 flex-shrink-0 mt-0.5" /> :
+                 <ShieldCheck className="w-7 h-7 flex-shrink-0 mt-0.5" />}
+                <div>
+                   <p className="font-black text-[11px] uppercase tracking-[0.25em] opacity-85">Biometric Match: {rawLevel}</p>
+                   <p className="text-base font-black mt-1">Triggers: {item.sensitivityAlert.triggerIngredient}</p>
+                   <p className="text-xs opacity-95 font-bold leading-relaxed mt-2 p-3 bg-black/10 rounded-2xl">
+                     {item.sensitivityAlert.message}
+                   </p>
+                </div>
+             </div>
+          </div>
+        )}
+
         <div className="space-y-2">
-            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between">
-                <span className="flex items-center gap-1"><FlaskConical className="w-3 h-3" /> Safety Breakdown</span>
+            <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center justify-between px-1">
+                <span className="flex items-center gap-1"><FlaskConical className="w-3 h-3" /> Bio-Components</span>
                 {item.category && <span className="bg-slate-100 px-1.5 py-0.5 rounded text-slate-500 uppercase font-black text-[9px]">{item.category}</span>}
             </h4>
             <div className="flex flex-wrap gap-1.5">
               {analysis.length > 0 ? (
-                analysis.map((ing, i) => (
-                    <div key={i} className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold shadow-sm flex items-center gap-1.5 ${
-                        ing.safetyLevel === 'high' ? 'bg-rose-50 border-rose-200 text-rose-700' :
-                        ing.safetyLevel === 'medium' ? 'bg-amber-50 border-amber-200 text-amber-700' :
-                        'bg-emerald-50 border-emerald-100 text-emerald-700'
-                    }`}>
-                        <div className={`w-1.5 h-1.5 rounded-full ${ing.safetyLevel === 'high' ? 'bg-rose-500' : ing.safetyLevel === 'medium' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-                        {ing.name}
-                    </div>
-                ))
+                analysis.map((ing, i) => {
+                    const ingHigh = isHighRisk(ing.safetyLevel);
+                    const ingMed = isMediumRisk(ing.safetyLevel);
+                    return (
+                        <div key={i} className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold shadow-sm flex items-center gap-1.5 ${
+                            ingHigh ? 'bg-rose-50 border-rose-200 text-rose-700' :
+                            ingMed ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                            'bg-emerald-50 border-emerald-100 text-emerald-700'
+                        }`}>
+                            <div className={`w-1.5 h-1.5 rounded-full ${ingHigh ? 'bg-rose-500' : ingMed ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                            {ing.name}
+                        </div>
+                    );
+                })
               ) : (
                 item.ingredients?.map((name, i) => (
                     <span key={i} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-[10px] font-medium border border-slate-200">{name}</span>
@@ -283,8 +354,8 @@ export const FoodLogger: React.FC = () => {
             <div className="absolute inset-0 bg-teal-200 rounded-full blur-2xl animate-pulse opacity-50"></div>
             <Loader2 className="w-16 h-16 text-teal-500 animate-spin relative z-10" />
         </div>
-        <h2 className="text-xl font-black text-slate-800 tracking-tight">Dismantling Meal...</h2>
-        <p className="text-slate-400 text-xs font-bold mt-2">Extracting biological data</p>
+        <h2 className="text-xl font-black text-slate-800 tracking-tight">Deconstructing Biological Matrix...</h2>
+        <p className="text-slate-400 text-xs font-bold mt-2">Checking against your unique clinical profile</p>
       </div>
     );
   }
@@ -296,7 +367,7 @@ export const FoodLogger: React.FC = () => {
       {!analysisResult ? (
         <div className="space-y-8">
            <div className="space-y-6">
-              <h2 className="text-3xl font-black text-slate-800 tracking-tight">New Food Log</h2>
+              <h2 className="text-3xl font-black text-slate-800 tracking-tight">New Food Entry</h2>
               <div className="grid grid-cols-2 gap-4">
                 <label className="bg-white border-2 border-dashed border-slate-200 rounded-[2.5rem] aspect-square flex flex-col items-center justify-center gap-4 cursor-pointer hover:border-teal-400 hover:bg-teal-50 transition-all group shadow-sm">
                   <input type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => handleFileChange(e, 'log')} />
@@ -316,10 +387,10 @@ export const FoodLogger: React.FC = () => {
            </div>
            
            <div className="space-y-5">
-              <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Clock className="w-4 h-4" /> Bio-History</h3>
+              <h3 className="text-sm font-black text-slate-400 uppercase tracking-widest flex items-center gap-2"><Clock className="w-4 h-4" /> Entry Archive</h3>
               <div className="space-y-4">
               {history.length === 0 ? (
-                  <div className="bg-white p-10 rounded-3xl border border-dashed border-slate-200 text-center text-slate-400 text-xs font-bold uppercase tracking-widest">No history yet.</div>
+                  <div className="bg-white p-10 rounded-3xl border border-dashed border-slate-200 text-center text-slate-400 text-xs font-bold uppercase tracking-widest">No entries recorded.</div>
               ) : (
                 history.map((log) => {
                   const items = log.detectedItems || [];
@@ -330,17 +401,21 @@ export const FoodLogger: React.FC = () => {
 
                   return (
                     <div key={log.id} className="relative group overflow-visible">
-                        <div onClick={() => startEdit(log)} className="bg-white rounded-[2rem] p-4 shadow-sm border border-slate-100 flex gap-4 cursor-pointer hover:border-teal-200 hover:shadow-md transition-all relative">
+                        <div onClick={() => startEdit(log)} className="bg-white rounded-[2rem] p-4 shadow-sm border border-slate-100 flex gap-4 cursor-pointer hover:border-teal-200 hover:shadow-md transition-all relative z-10">
                             <div className="w-24 h-24 bg-slate-100 rounded-2xl overflow-hidden flex-shrink-0 border border-slate-50 relative">
                                 {log.imageUrl ? <img src={log.imageUrl} className="w-full h-full object-cover" /> : <Utensils className="w-8 h-8 m-auto text-slate-300" />}
                                 <div className="absolute bottom-1 right-1 flex gap-0.5">
-                                    {items.slice(0, 3).map((item, idx) => (
-                                        <div key={idx} className={`w-1.5 h-1.5 rounded-full ${
-                                            item.sensitivityAlert?.level === 'high' || item.ingredientAnalysis?.some(ia => ia.safetyLevel === 'high') ? 'bg-rose-500' :
-                                            item.sensitivityAlert?.level === 'medium' || item.ingredientAnalysis?.some(ia => ia.safetyLevel === 'medium') ? 'bg-amber-500' :
-                                            'bg-emerald-500'
-                                        }`} />
-                                    ))}
+                                    {items.slice(0, 3).map((item, idx) => {
+                                        const high = isHighRisk(item.sensitivityAlert?.level) || item.ingredientAnalysis?.some(ia => isHighRisk(ia.safetyLevel));
+                                        const med = isMediumRisk(item.sensitivityAlert?.level) || item.ingredientAnalysis?.some(ia => isMediumRisk(ia.safetyLevel));
+                                        return (
+                                            <div key={idx} className={`w-1.5 h-1.5 rounded-full ${
+                                                high ? 'bg-rose-500' :
+                                                med ? 'bg-amber-500' :
+                                                'bg-emerald-500'
+                                            }`} />
+                                        );
+                                    })}
                                 </div>
                             </div>
                             <div className="flex-1 py-1 pr-14 flex flex-col justify-between">
@@ -370,15 +445,15 @@ export const FoodLogger: React.FC = () => {
                                     </div>
                                 </div>
                             </div>
-                            <button 
-                                type="button"
-                                onClick={(e) => handleDeleteLog(e, log.id)} 
-                                className="absolute top-4 right-4 p-3 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition-all z-[60] shadow-sm active:scale-90"
-                                title="Delete Log"
-                            >
-                                <Trash2 className="w-5 h-5" />
-                            </button>
                         </div>
+                        <button 
+                            type="button"
+                            onClick={(e) => handleDeleteLog(e, log.id)} 
+                            className="absolute top-4 right-4 p-3 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition-all z-[20] shadow-sm active:scale-90"
+                            title="Delete Log"
+                        >
+                            <Trash2 className="w-5 h-5" />
+                        </button>
                     </div>
                   );
                 })
@@ -389,54 +464,66 @@ export const FoodLogger: React.FC = () => {
       ) : (
         <div className="space-y-6 pb-24 animate-in fade-in slide-in-from-bottom-4 duration-300">
            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-2xl font-black text-slate-800">Meal Analysis</h2>
+              <h2 className="text-2xl font-black text-slate-800">Biological Audit</h2>
               <button onClick={resetForm} className="p-2 bg-slate-100 rounded-full text-slate-500"><X className="w-5 h-5" /></button>
            </div>
            {saveSuccess && (
                 <div className="bg-emerald-500 text-white p-4 rounded-2xl flex items-center gap-3 animate-in zoom-in duration-300">
                     <CheckCircle className="w-6 h-6" />
-                    <span className="font-bold">Log Committed Successfully!</span>
+                    <span className="font-bold">Entry Synchronized!</span>
                 </div>
             )}
            {verdict && (
-                <div className={`${verdict.color} text-white p-5 rounded-3xl shadow-xl flex items-center gap-4 relative overflow-hidden`}>
-                    <div className="bg-white/20 p-3 rounded-2xl backdrop-blur-sm">{verdict.icon}</div>
-                    <div>
-                        <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-80 leading-none">Biological Verdict</span>
-                        <p className="text-xl font-black tracking-tight">{verdict.label}: {verdict.text}</p>
+                <div className={`${verdict.color} text-white p-7 rounded-[3rem] shadow-2xl flex items-center gap-5 relative overflow-hidden ring-4 ring-white/30 animate-in slide-in-from-top-4`}>
+                    <div className="bg-white/20 p-4 rounded-3xl backdrop-blur-md shadow-inner border border-white/20">{verdict.icon}</div>
+                    <div className="flex-1">
+                        <span className="text-[11px] font-black uppercase tracking-[0.35em] opacity-90 leading-none block mb-1">Final Bio-Verdict</span>
+                        <p className="text-2xl font-black tracking-tight leading-tight">{verdict.label}: {verdict.text}</p>
                     </div>
                 </div>
             )}
            {imagePreview && (
-                <div className="rounded-3xl overflow-hidden shadow-lg aspect-video bg-slate-100 border-4 border-white">
+                <div className="rounded-[2.5rem] overflow-hidden shadow-lg aspect-video bg-slate-100 border-4 border-white">
                     <img src={imagePreview} alt="Analysis" className="w-full h-full object-cover" />
                 </div>
             )}
-           <div className="space-y-4">
-                {analysisResult.detectedItems?.map((item, idx) => (
-                <div key={idx} className={`bg-white p-6 rounded-3xl shadow-sm border-2 transition-all ${
-                    item.sensitivityAlert?.level === 'high' || item.ingredientAnalysis?.some(i => i.safetyLevel === 'high') ? 'border-rose-200' : 
-                    item.sensitivityAlert?.level === 'medium' || item.ingredientAnalysis?.some(i => i.safetyLevel === 'medium') ? 'border-amber-200' : 
-                    'border-slate-100'
-                }`}>
-                    <div className="flex justify-between items-start mb-4">
-                        <h3 className="font-black text-xl text-slate-800 leading-none">{item.name}</h3>
-                        <button onClick={() => removeItem(idx)} className="text-slate-300 hover:text-rose-500 transition-colors p-2">
-                            <Trash2 className="w-5 h-5" />
-                        </button>
-                    </div>
-                    {renderIngredientAnalysis(item as FoodItem)}
-                </div>
-                ))}
+           <div className="space-y-5">
+                {analysisResult.detectedItems?.map((item, idx) => {
+                    const sensitivityLevel = item.sensitivityAlert?.level;
+                    const ingredientsHigh = item.ingredientAnalysis?.some(i => isHighRisk(i.safetyLevel));
+                    const ingredientsMedium = item.ingredientAnalysis?.some(i => isMediumRisk(i.safetyLevel));
+
+                    const isHigh = isHighRisk(sensitivityLevel) || ingredientsHigh;
+                    const isMedium = isMediumRisk(sensitivityLevel) || ingredientsMedium;
+
+                    return (
+                        <div key={idx} className={`bg-white p-7 rounded-[2.5rem] shadow-sm border-2 transition-all ${
+                            isHigh ? 'border-rose-400 ring-4 ring-rose-50/70' : 
+                            isMedium ? 'border-amber-400 ring-4 ring-amber-50/70' : 
+                            'border-slate-100'
+                        }`}>
+                            <div className="flex justify-between items-start mb-4">
+                                <div>
+                                    <h3 className="font-black text-2xl text-slate-800 leading-none">{item.name}</h3>
+                                    {isHigh && <span className="text-rose-600 text-[11px] font-black uppercase tracking-widest mt-2 block flex items-center gap-1"><ShieldAlert className="w-3 h-3" /> Bio-Hazard Flagged</span>}
+                                </div>
+                                <button onClick={() => removeItem(idx)} className="text-slate-300 hover:text-rose-500 transition-colors p-2">
+                                    <Trash2 className="w-5 h-5" />
+                                </button>
+                            </div>
+                            {renderIngredientAnalysis(item as FoodItem)}
+                        </div>
+                    );
+                })}
            </div>
-           <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2rem] p-6 shadow-sm">
+           <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2.5rem] p-8 shadow-sm">
               <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-                  <ListPlus className="w-4 h-4" /> Missing Item?
+                  <ListPlus className="w-4 h-4" /> Add Missing Bio-Component
               </h3>
               <div className="flex gap-2">
                    <input 
                       type="text" 
-                      placeholder="e.g. Avocado, Milk..." 
+                      placeholder="e.g. Olive Oil, Garlic..." 
                       className="flex-1 bg-slate-50 border border-slate-200 p-4 rounded-2xl outline-none text-sm font-bold text-slate-800" 
                       value={manualAddInput}
                       onChange={(e) => setManualAddInput(e.target.value)}
@@ -446,15 +533,15 @@ export const FoodLogger: React.FC = () => {
                    <button 
                       onClick={handleManualItemAdd}
                       disabled={!manualAddInput.trim() || isEnrichingManual}
-                      className="bg-slate-900 text-white px-6 rounded-2xl disabled:opacity-50"
+                      className="bg-slate-900 text-white px-6 rounded-2xl disabled:opacity-50 active:scale-95 transition-transform"
                    >
                        {isEnrichingManual ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
                    </button>
               </div>
           </div>
-           <button onClick={handleSave} disabled={isSavingStatus || isEnrichingManual} className="w-full bg-slate-900 text-white py-5 rounded-3xl font-black text-xl shadow-xl active:scale-95 transition-all flex items-center justify-center gap-3">
+           <button onClick={handleSave} disabled={isSavingStatus || isEnrichingManual} className="w-full bg-slate-900 text-white py-6 rounded-[2.5rem] font-black text-xl shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-3">
              {isSavingStatus ? <Loader2 className="animate-spin" /> : <Save className="w-6 h-6" />}
-             {isSavingStatus ? 'Syncing...' : 'Commit to Log'}
+             {isSavingStatus ? 'Saving...' : 'Add food to log'}
            </button>
         </div>
       )}

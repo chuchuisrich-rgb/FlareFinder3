@@ -3,7 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { db } from '../services/db';
 import { generatePatternInsights, getSmartReminders, runFlareDetective } from '../services/geminiService';
 import { AppState, Reminder, DeepAnalysis, FlareDetectiveReport } from '../types';
-import { Sparkles, TrendingUp, TrendingDown, Activity, Bell, Clock, Beaker, Shield, AlertOctagon, RefreshCw, CheckCircle2, Flame, X, ArrowRight, ScanLine, Search, Camera, ScanBarcode, Microscope, CalendarHeart, Loader2, Layers, AlertTriangle, Plus, CloudSun, Utensils, Smile, Heart, Sunrise, CloudRain, Sun, HelpCircle, MessageCircle, Zap, ShieldAlert, Info, ShoppingBag, Fingerprint, BrainCircuit } from 'lucide-react';
+import { Sparkles, TrendingUp, TrendingDown, Activity, Bell, Clock, Beaker, Shield, AlertOctagon, RefreshCw, CheckCircle2, Flame, X, ArrowRight, ScanLine, Search, Camera, ScanBarcode, Microscope, CalendarHeart, Loader2, Layers, AlertTriangle, Plus, CloudSun, Utensils, Smile, Heart, Sunrise, CloudRain, Sun, HelpCircle, MessageCircle, Zap, ShieldAlert, Info, ShoppingBag, Fingerprint, BrainCircuit, BarChart, Database } from 'lucide-react';
 import {
   AreaChart,
   Area,
@@ -25,6 +25,7 @@ export const Dashboard: React.FC = () => {
   const [detectiveReport, setDetectiveReport] = useState<FlareDetectiveReport | null>(null);
   const [isRunningDetective, setIsRunningDetective] = useState(false);
   const [triggerMap, setTriggerMap] = useState<{name: string, probability: number, volume: number}[]>([]);
+  const [showIndexInfo, setShowIndexInfo] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -228,7 +229,15 @@ export const Dashboard: React.FC = () => {
                    <div>
                        <div className="flex items-center gap-2 mb-1">
                            <h2 className="text-slate-400 text-[10px] font-black uppercase tracking-[0.2em]">Inflammation Index</h2>
+                           <button onClick={() => setShowIndexInfo(!showIndexInfo)} className="p-1 text-slate-600 hover:text-white transition-colors">
+                              <HelpCircle className="w-3.5 h-3.5" />
+                           </button>
                        </div>
+                       {showIndexInfo && (
+                          <div className="absolute top-12 left-0 z-50 bg-slate-800 border border-slate-700 p-4 rounded-2xl shadow-xl w-64 text-xs font-medium text-slate-300 animate-in fade-in zoom-in duration-200">
+                             This index (0-100) scales your highest recorded flare severity today. 100 represents a peak (Severity 5) crisis.
+                          </div>
+                       )}
                        <div className="flex items-baseline gap-2">
                            <span className="text-6xl font-black text-white tabular-nums">{currentScore}</span>
                            <span className="text-slate-500 font-bold text-sm tracking-widest">/100</span>
@@ -278,12 +287,22 @@ export const Dashboard: React.FC = () => {
 
        {triggerMap.length > 0 && (
            <div className="space-y-4">
-               <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] flex items-center gap-2">
-                   <AlertTriangle className="w-4 h-4 text-amber-500" /> Neural Suspect Gallery
-               </h3>
+               <div className="flex items-center justify-between px-1">
+                  <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em] flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-amber-500" /> Neural Suspect Gallery
+                  </h3>
+                  <div className="flex items-center gap-1.5 text-[9px] font-black text-slate-400 uppercase">
+                     <Database className="w-3 h-3" /> Statistical Match
+                  </div>
+               </div>
                <div className="grid grid-cols-1 gap-3">
                    {triggerMap.slice(0, 4).map((suspect, i) => (
-                       <div key={i} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4 group hover:border-rose-200 transition-all">
+                       <div key={i} className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4 group hover:border-rose-200 transition-all relative overflow-hidden">
+                           {suspect.volume < 3 && (
+                               <div className="absolute top-0 right-0 bg-slate-900 text-white px-3 py-1 text-[8px] font-black uppercase tracking-widest rounded-bl-xl border-l border-b border-slate-800">
+                                  Low Confidence (Data Needed)
+                               </div>
+                           )}
                            <div className={`w-12 h-12 rounded-2xl flex items-center justify-center font-black text-lg ${suspect.probability > 60 ? 'bg-rose-100 text-rose-600' : 'bg-amber-100 text-amber-600'}`}>
                                {suspect.probability}%
                            </div>
@@ -294,12 +313,15 @@ export const Dashboard: React.FC = () => {
                                </div>
                            </div>
                            <div className="text-right">
-                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Volume</p>
+                               <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Exposures</p>
                                <p className="text-xs font-black text-slate-700">{suspect.volume}x</p>
                            </div>
                        </div>
                    ))}
                </div>
+               <p className="text-[10px] text-center text-slate-400 font-medium px-4 leading-relaxed italic">
+                 "100% correlation means every recorded exposure preceded a flare within 48h. More data volume increases suspect reliability."
+               </p>
            </div>
        )}
 
@@ -315,7 +337,7 @@ export const Dashboard: React.FC = () => {
                        <div key={i} className="bg-white/60 backdrop-blur-sm p-4 rounded-2xl border border-indigo-200 flex justify-between items-center">
                            <div className="flex-1 pr-4">
                                <p className="text-xs font-black text-slate-800">{s.name}</p>
-                               <p className="text-[10px] text-slate-500 font-medium leading-tight mt-1">{s.reason}</p>
+                               <p className="text-[10px] text-slate-500 font-medium tight mt-1">{s.reason}</p>
                            </div>
                            <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg border border-indigo-100 uppercase">{Math.round(s.confidence * 100)}% Conf.</span>
                        </div>
@@ -324,14 +346,13 @@ export const Dashboard: React.FC = () => {
            </div>
        )}
 
-       <div className="grid grid-cols-2 gap-4">
-          <button onClick={() => setShowLabs(true)} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center gap-3 hover:border-indigo-200 active:scale-95 transition-all">
-              <div className="bg-indigo-50 p-4 rounded-2xl"><Microscope className="w-8 h-8 text-indigo-600" /></div>
-              <span className="font-black text-slate-700 text-[10px] uppercase tracking-widest">Lab Vault</span>
-          </button>
-          <button onClick={() => window.location.hash = 'shop'} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center gap-3 hover:border-teal-200 active:scale-95 transition-all">
-              <div className="bg-teal-50 p-4 rounded-2xl"><ShoppingBag className="w-8 h-8 text-teal-600" /></div>
-              <span className="font-black text-slate-700 text-[10px] uppercase tracking-widest">Bio-Shop</span>
+       <div className="w-full">
+          <button onClick={() => setShowLabs(true)} className="w-full bg-white p-6 rounded-[2.5rem] shadow-sm border border-slate-100 flex items-center gap-6 hover:border-indigo-200 active:scale-95 transition-all">
+              <div className="bg-indigo-50 p-5 rounded-3xl flex-shrink-0"><Microscope className="w-10 h-10 text-indigo-600" /></div>
+              <div className="text-left">
+                  <span className="font-black text-slate-800 text-lg block leading-none">Lab Vault</span>
+                  <span className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mt-1 block">Manage clinical results & sensitivities</span>
+              </div>
           </button>
        </div>
 
