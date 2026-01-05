@@ -74,7 +74,7 @@ export const FoodLogger: React.FC = () => {
     const user = db.getState().user;
     try {
       const result = await analyzeFoodImage(base64, "image/jpeg", user);
-      if (result) setAnalysisResult(result);
+      if (result) setAnalysisResult(annotateWithSensitivities(result));
       else throw new Error("AI returned no results.");
     } catch (err) {
       console.error(err);
@@ -93,22 +93,22 @@ export const FoodLogger: React.FC = () => {
       const user = db.getState().user;
       if (!user) return;
       try {
-          const enrichedItem = await enrichManualFoodItem(itemToEnrich, user);
-          setAnalysisResult(prev => ({
-              ...prev,
-              detectedItems: [...(prev?.detectedItems || []), enrichedItem],
-              timestamp: prev?.timestamp || new Date().toISOString()
-          }));
+      const enrichedItem = await enrichManualFoodItem(itemToEnrich, user);
+      setAnalysisResult(prev => annotateWithSensitivities({
+        ...prev,
+        detectedItems: [...(prev?.detectedItems || []), enrichedItem],
+        timestamp: prev?.timestamp || new Date().toISOString()
+      }));
       } catch (err) {
           console.error(err);
-          setAnalysisResult(prev => ({
-              ...prev,
-              detectedItems: [...(prev?.detectedItems || []), {
-                  name: itemToEnrich, category: 'Other', ingredients: [], confidence: 1, reasoning: 'Manual Add',
-                  nutrition: { calories: 0, protein: 0, carbs: 0, fat: 0 }
-              }],
-              timestamp: prev?.timestamp || new Date().toISOString()
-          }));
+      setAnalysisResult(prev => annotateWithSensitivities({
+        ...prev,
+        detectedItems: [...(prev?.detectedItems || []), {
+          name: itemToEnrich, category: 'Other', ingredients: [], confidence: 1, reasoning: 'Manual Add',
+          nutrition: { calories: 0, protein: 0, carbs: 0, fat: 0 }
+        }],
+        timestamp: prev?.timestamp || new Date().toISOString()
+      }));
       } finally {
           setIsEnrichingManual(false);
       }
@@ -120,7 +120,7 @@ export const FoodLogger: React.FC = () => {
     const user = db.getState().user;
     try {
       const result = await scanGroceryProduct(base64, "image/jpeg", user);
-      if (result) setAnalysisResult(result);
+      if (result) setAnalysisResult(annotateWithSensitivities(result));
     } catch (err) {
       console.error(err);
       alert("Grocery scan failed.");
@@ -136,12 +136,12 @@ export const FoodLogger: React.FC = () => {
     setIsAnalyzing(true);
     const user = db.getState().user;
     try {
-      const result = await processVoiceCommand(originalText, user);
-      if (result.foodLogs && result.foodLogs.length > 0) setAnalysisResult(result.foodLogs[0]);
-      else {
-          const enrichedItem = await enrichManualFoodItem(originalText, user!);
-          setAnalysisResult({ detectedItems: [enrichedItem], timestamp: new Date().toISOString() });
-      }
+    const result = await processVoiceCommand(originalText, user);
+    if (result.foodLogs && result.foodLogs.length > 0) setAnalysisResult(annotateWithSensitivities(result.foodLogs[0]));
+    else {
+      const enrichedItem = await enrichManualFoodItem(originalText, user!);
+      setAnalysisResult(annotateWithSensitivities({ detectedItems: [enrichedItem], timestamp: new Date().toISOString() }));
+    }
     } catch (err) { console.error(err); alert("Processing error."); } finally { setIsAnalyzing(false); }
   };
 
@@ -173,15 +173,37 @@ export const FoodLogger: React.FC = () => {
     if (!analysisResult?.detectedItems?.length || isEnrichingManual) return;
     setIsSavingStatus(true);
     await new Promise(r => setTimeout(r, 400));
+    // Annotate the current analysis result (use the shared logic so matching is consistent)
+    const annotatedRes = annotateWithSensitivities(analysisResult);
+    const annotatedItems = (annotatedRes?.detectedItems || []) as FoodItem[];
+
     const log: FoodLog = {
       id: editingLogId || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36)),
       timestamp: analysisResult.timestamp || new Date().toISOString(),
       imageUrl: imagePreview || undefined,
-      detectedItems: analysisResult.detectedItems as FoodItem[],
+      detectedItems: annotatedItems,
       isGroceryScan: mode === 'grocery'
     };
     if (editingLogId) db.updateFoodLog(log);
     else db.addFoodLog(log);
+    // Notify user if the meal should be avoided based on lab sensitivities
+    const highest = (() => {
+      let max: string = 'low';
+      annotatedItems.forEach(i => {
+        if (i.sensitivityAlert?.level === 'high') max = 'high';
+        else if (i.sensitivityAlert?.level === 'medium' && max !== 'high') max = 'medium';
+        i.ingredientAnalysis?.forEach(ing => {
+          if (ing.safetyLevel === 'high') max = 'high';
+          else if (ing.safetyLevel === 'medium' && max !== 'high') max = 'medium';
+        });
+      });
+      return max;
+    })();
+    if (highest === 'high') {
+      alert('WARNING: This meal contains items flagged by your lab results. Consider avoiding it.');
+    } else if (highest === 'medium') {
+      alert('Caution: This meal may contain potential triggers based on your profile.');
+    }
     setSaveSuccess(true);
     setTimeout(() => {
         setSaveSuccess(false);
@@ -197,6 +219,63 @@ export const FoodLogger: React.FC = () => {
     setIsAnalyzing(false);
     setEditingLogId(null);
     setManualAddInput('');
+  };
+
+  // Annotate analysis result with any lab-based sensitivities from user's profile
+  const annotateWithSensitivities = (res: Partial<FoodLog> | null): Partial<FoodLog> | null => {
+    if (!res) return res;
+    const sensitivities = db.getSensitivities();
+
+    const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+
+    const tokens = (s: string) => normalize(s).split(/\s+/).filter(t => t.length >= 3);
+
+    const findMatch = (item: FoodItem) => {
+      const name = (item.name || '').toLowerCase();
+      const ingList = (item.ingredients || []).map(i => i.toLowerCase());
+
+      for (const s of sensitivities) {
+        const sf = s.food.toLowerCase();
+        // direct substring match (e.g., 'yogurt' in 'yogurt bowl with berries')
+        if (name.includes(sf) || sf.includes(name)) return s;
+        // check ingredients containing the sensitivity
+        if (ingList.some(i => i.includes(sf) || sf.includes(i))) return s;
+        // token intersection (robust to word order)
+        const sTokens = tokens(s.food);
+        const nameTokens = tokens(item.name || '');
+        const common = sTokens.filter(t => nameTokens.includes(t));
+        if (common.length > 0) return s;
+        // token vs ingredients
+        const ingTokens = ingList.flatMap(i => tokens(i));
+        const common2 = sTokens.filter(t => ingTokens.includes(t));
+        if (common2.length > 0) return s;
+      }
+      return undefined;
+    };
+
+    const items = (res.detectedItems || []).map((item) => {
+      const matched = findMatch(item);
+      if (matched) {
+        const alert = {
+          level: matched.level,
+          triggerIngredient: matched.food,
+          message: matched.source === 'lab_result' ? `Lab result: ${matched.food} (${matched.level})` : `Manual trigger: ${matched.food} (${matched.level})`
+        };
+        const safetyLevel = matched.level === 'low' ? 'safe' : matched.level;
+        const addedAnalysis = {
+          name: matched.food,
+          safetyLevel: safetyLevel as 'high' | 'medium' | 'safe',
+          reason: matched.source === 'lab_result' ? 'Matched in lab results' : 'Matched manual trigger'
+        };
+  const existingAnalysis = item.ingredientAnalysis || [];
+  // avoid duplicate entries for the same matched food
+  const alreadyExists = existingAnalysis.some(a => (a.name || '').toLowerCase() === matched.food.toLowerCase());
+  return { ...item, sensitivityAlert: alert, ingredientAnalysis: alreadyExists ? existingAnalysis : [...existingAnalysis, addedAnalysis] } as FoodItem;
+      }
+      return item;
+    }) as FoodItem[];
+
+    return { ...res, detectedItems: items };
   };
 
   const getMealVerdict = () => {
@@ -238,9 +317,15 @@ export const FoodLogger: React.FC = () => {
                     </div>
                 ))
               ) : (
-                item.ingredients?.map((name, i) => (
-                    <span key={i} className="px-2 py-1 bg-slate-100 text-slate-600 rounded text-[10px] font-medium border border-slate-200">{name}</span>
-                ))
+                item.ingredients?.map((name, i) => {
+                    const trigger = item.sensitivityAlert?.triggerIngredient;
+                    const matchesTrigger = trigger ? name.toLowerCase().includes(trigger.toLowerCase()) : false;
+                    const level = matchesTrigger ? item.sensitivityAlert?.level : undefined;
+                    const classes = level === 'high' ? 'px-2 py-1 rounded text-[10px] font-medium border border-rose-200 bg-rose-50 text-rose-700' :
+                                    level === 'medium' ? 'px-2 py-1 rounded text-[10px] font-medium border border-amber-200 bg-amber-50 text-amber-700' :
+                                    'px-2 py-1 bg-slate-100 text-slate-600 rounded text-[10px] font-medium border border-slate-200';
+                    return <span key={i} className={classes}>{name}</span>;
+                })
               )}
             </div>
         </div>

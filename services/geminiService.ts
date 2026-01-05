@@ -3,6 +3,7 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { AppState, FoodLog, BehaviorLog, Reminder, UserProfile, DeepAnalysis, MarketplaceProduct, SimulationResult, GlobalInsight, FoodSensitivity, FlareDetectiveReport, LabReport, Recipe, DayPlan, Biomarker, MenuAnalysis, FoodItem } from "../types";
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist';
+// import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.entry';
 
 // Define strict schemas for clinical data extraction
 const LAB_RESULT_SCHEMA = {
@@ -125,7 +126,8 @@ const extractPdfPages = async (base64Data: string): Promise<string[]> => {
     try {
         // Initialize worker only when needed to prevent blocking
         if (typeof window !== 'undefined' && pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
-            const WORKER_VERSION = '4.0.379';
+            // const WORKER_VERSION = '4.0.379';
+            const WORKER_VERSION = process.env.WORKER_VERSION;
             pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${WORKER_VERSION}/build/pdf.worker.min.mjs`;
         }
 

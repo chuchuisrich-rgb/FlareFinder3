@@ -325,13 +325,9 @@ export const Dashboard: React.FC = () => {
        )}
 
        <div className="grid grid-cols-2 gap-4">
-          <button onClick={() => setShowLabs(true)} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center gap-3 hover:border-indigo-200 active:scale-95 transition-all">
+          <button onClick={() => setShowLabs(true)} className="col-span-2 w-full bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center gap-3 hover:border-indigo-200 active:scale-95 transition-all">
               <div className="bg-indigo-50 p-4 rounded-2xl"><Microscope className="w-8 h-8 text-indigo-600" /></div>
               <span className="font-black text-slate-700 text-[10px] uppercase tracking-widest">Lab Vault</span>
-          </button>
-          <button onClick={() => window.location.hash = 'shop'} className="bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center gap-3 hover:border-teal-200 active:scale-95 transition-all">
-              <div className="bg-teal-50 p-4 rounded-2xl"><ShoppingBag className="w-8 h-8 text-teal-600" /></div>
-              <span className="font-black text-slate-700 text-[10px] uppercase tracking-widest">Bio-Shop</span>
           </button>
        </div>
 
