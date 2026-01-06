@@ -5,7 +5,7 @@ let _redis: any = null;
 async function getRedis() {
   if (_redis) return _redis;
   try {
-    const mod = await import('../../lib/redis.js');
+    const mod: any = await import('../../lib/redis.js');
     _redis = mod.redis;
     return _redis;
   } catch (err) {
