@@ -1,6 +1,9 @@
 
 import React, { useState } from 'react';
 import { db } from '../services/db';
+import { Login } from './Login';
+import { Signup } from './Signup';
+import { DISCLOSURE_SECTIONS, CURRENT_DISCLOSURE_VERSION } from '../src/content/legal/disclosure_v1';
 import { UserProfile } from '../types';
 import { ChevronRight, ShieldAlert, Check, AlertTriangle, Info, Scale, ShieldCheck } from 'lucide-react';
 
@@ -15,7 +18,23 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
   const [severity, setSeverity] = useState('');
   const [triggers, setTriggers] = useState<string[]>([]);
   const [goals, setGoals] = useState<string[]>([]);
-  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [hasAcceptedDisclosure, setHasAcceptedDisclosure] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [showSignup, setShowSignup] = useState(false);
+  const [consentError, setConsentError] = useState('');
+  const [shakeConsent, setShakeConsent] = useState(false);
+
+  const validateConsent = () => {
+    if (hasAcceptedDisclosure) {
+      setConsentError('');
+      return true;
+    }
+    // show prominent error and shake the checkbox area
+    setConsentError('Please acknowledge the Medical Disclosure above before creating an account.');
+    setShakeConsent(true);
+    setTimeout(() => setShakeConsent(false), 600);
+    return false;
+  };
 
   const totalSteps = 5;
 
@@ -69,62 +88,66 @@ export const Onboarding: React.FC<OnboardingProps> = ({ onComplete }) => {
             </div>
             <h1 className="text-3xl font-black text-slate-900 tracking-tight leading-none">Medical Disclosure</h1>
             
-            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-4 max-h-72 overflow-y-auto no-scrollbar text-[13px] text-slate-600 leading-relaxed font-medium">
-                <section>
-                    <h4 className="font-black text-slate-800 uppercase text-[10px] mb-1 flex items-center gap-1">
-                        <Scale className="w-3 h-3" /> 1. No Medical Advice
-                    </h4>
-                    <p>FlareFinder AI is a health-tracking diary intended for educational and personal organization purposes only. It does NOT provide medical advice, diagnosis, or treatment. It is not a substitute for clinical judgment.</p>
-                </section>
-
-                <section>
-                    <h4 className="font-black text-slate-800 uppercase text-[10px] mb-1 flex items-center gap-1">
-                        <AlertTriangle className="w-3 h-3" /> 2. AI & Data Accuracy
-                    </h4>
-                    <p>This App uses Artificial Intelligence. AI can produce inaccurate results ("hallucinations"). Do not rely on "Safe" or "Unsafe" verdicts as absolute fact. Always read labels manually.</p>
-                </section>
-
-                <section>
-                    <h4 className="font-black text-slate-800 uppercase text-[10px] mb-1 flex items-center gap-1">
-                        <Info className="w-3 h-3" /> 3. Emergency Situations
-                    </h4>
-                    <p>If you have a fever, signs of infection, or intense pain, STOP using this app and seek immediate professional medical assistance or go to the nearest ER.</p>
-                </section>
-
-                <section>
-                    <h4 className="font-black text-slate-800 uppercase text-[10px] mb-1 flex items-center gap-1">
-                        <Check className="w-3 h-3" /> 4. Assumption of Risk
-                    </h4>
-                    <p>By proceeding, you agree that you are solely responsible for any lifestyle changes you make. The developers are not liable for any adverse health events.</p>
-                </section>
-
-                <section>
-                    <h4 className="font-black text-slate-800 uppercase text-[10px] mb-1 flex items-center gap-1">
-                        <ShieldCheck className="w-3 h-3" /> 5. Data Sovereignty & Privacy
-                    </h4>
-                    <p>Your privacy is absolute. All logs, photos, and clinical results are stored locally on this device. We do not have a central database. <strong>Important:</strong> Clearing your browser cache or clicking the "Purge" button in Settings will permanently delete all your data. Data is only transmitted to secure AI models temporarily when you request specific insights or analysis.</p>
-                </section>
-            </div>
-            
-            <button 
-                onClick={() => setAcceptedTerms(!acceptedTerms)}
-                className={`w-full p-4 rounded-2xl border-2 flex items-center gap-4 transition-all ${
-                    acceptedTerms ? 'bg-emerald-50 border-emerald-500 text-emerald-700' : 'bg-white border-slate-100 text-slate-400'
-                }`}
-            >
-                <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center ${acceptedTerms ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200'}`}>
-                    {acceptedTerms && <Check className="w-4 h-4" />}
+              {/* show the disclosure only when the user hasn't proceeded to the signup form or login */}
+              {!showSignup && !showLogin && (
+                <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 space-y-4 max-h-72 overflow-y-auto no-scrollbar text-[13px] text-slate-600 leading-relaxed font-medium">
+                  {DISCLOSURE_SECTIONS.map((s, idx) => {
+                    const Icon = [Scale, AlertTriangle, Info, Check, ShieldCheck][idx] || Scale;
+                    return (
+                      <section key={s.title}>
+                        <h4 className="font-black text-slate-800 uppercase text-[10px] mb-1 flex items-center gap-1">
+                          <Icon className="w-3 h-3" /> {s.title}
+                        </h4>
+                        <p>{s.body}</p>
+                      </section>
+                    );
+                  })}
                 </div>
-                <span className="font-bold text-sm text-left leading-tight">I understand the medical limitations and that my data is stored locally.</span>
-            </button>
+              )}
 
-            <button 
-              onClick={() => acceptedTerms && setStep(1)}
-              disabled={!acceptedTerms}
-              className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg flex items-center justify-center gap-2 hover:bg-slate-800 transition-all disabled:opacity-50"
-            >
-              Accept & Start Onboarding <ChevronRight className="w-6 h-6" />
-            </button>
+            <div className="grid gap-3">
+        <div>
+        <style>{`
+          @keyframes ff-shake { 0%{transform:translateX(0)}25%{transform:translateX(-6px)}50%{transform:translateX(6px)}75%{transform:translateX(-4px)}100%{transform:translateX(0)} }
+          .ff-shake{animation:ff-shake 600ms ease-in-out}
+        `}</style>
+        <button 
+          onClick={() => setHasAcceptedDisclosure(!hasAcceptedDisclosure)}
+          className={`w-full p-4 rounded-2xl border-2 flex items-center gap-4 transition-all ${
+            hasAcceptedDisclosure ? 'bg-emerald-50 border-emerald-500 text-emerald-700' : 'bg-white border-slate-100 text-slate-400'
+          } ${shakeConsent ? 'ff-shake' : ''}`}
+        >
+          <div className={`w-6 h-6 rounded-lg border-2 flex items-center justify-center ${hasAcceptedDisclosure ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-200'}`}>
+            {hasAcceptedDisclosure && <Check className="w-4 h-4" />}
+          </div>
+          <span className="font-bold text-sm text-left leading-tight">I understand the medical limitations and that my data is stored locally.</span>
+        </button>
+        {consentError && <div role="alert" className="mt-2 text-sm text-red-600 font-bold">{consentError}</div>}
+        </div>
+
+              <button 
+                onClick={() => hasAcceptedDisclosure && setShowSignup(true)}
+                disabled={!hasAcceptedDisclosure}
+                className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg flex items-center justify-center gap-2 hover:bg-slate-800 transition-all disabled:opacity-50"
+              >
+                Accept & Start Onboarding <ChevronRight className="w-6 h-6" />
+              </button>
+
+              <div className="pt-2 border-t border-slate-100" />
+
+              <div className="text-sm text-slate-600">Already have an account? <button onClick={() => { setShowLogin(!showLogin); setShowSignup(false); }} className="text-teal-600 font-bold">Sign in</button> · <button onClick={() => {
+                // gate Create account behind consent validation
+                if (validateConsent()) {
+                  setShowSignup(!showSignup);
+                  setShowLogin(false);
+                }
+              }} className="text-teal-600 font-bold">Create account</button></div>
+
+              <div className="mt-2">
+                {showLogin && <Login onSuccess={() => onComplete()} />}
+                {showSignup && <Signup onSuccess={() => setStep(1)} hasAcceptedTerms={hasAcceptedDisclosure} />}
+              </div>
+            </div>
           </div>
         )}
 

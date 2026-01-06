@@ -25,3 +25,8 @@ dist-ssr
 
 # Environment variables file
 .env
+.vercel
+.env*.local
+
+# Local Upstash dev store
+.upstash_dev.json

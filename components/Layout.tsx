@@ -1,6 +1,7 @@
 
 import { LayoutDashboard, Camera, Flame, Activity, Settings, ShoppingBag } from 'lucide-react';
 import React from 'react';
+import { DISCLOSURE_SECTIONS } from '../src/content/legal/disclosure_v1';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -34,6 +35,14 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange
 
       <main className="flex-1 overflow-y-auto pb-24">
         <div className="max-w-md mx-auto w-full p-4">
+          {/* top disclosure banner on Home for transparency */}
+          {/** show a small persistent disclosure banner on Home/Landing */}
+          {/** Layout doesn't render during Onboarding (App shows Onboarding earlier), so this is fine */}
+          <div className="mb-4">
+            <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 text-sm text-amber-800">
+              <strong>Medical Disclosure:</strong> {DISCLOSURE_SECTIONS && DISCLOSURE_SECTIONS[0]?.body}
+            </div>
+          </div>
           {children}
         </div>
       </main>

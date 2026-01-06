@@ -9,16 +9,18 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "recharts": "^3.5.1",
-    "react": "^19.2.0",
     "@google/genai": "^1.30.0",
-    "react-dom": "^19.2.0",
-    "lucide-react": "^0.555.0",
-    "pdfjs-dist": "4.0.379",
-    "vite": "^7.3.0",
+  "@upstash/redis": "^1.25.0",
+    "bcryptjs": "^2.4.3",
     "@vitejs/plugin-react": "^5.1.2",
+    "lucide-react": "^0.555.0",
     "path": "^0.12.7",
-    "url": "^0.11.4"
+    "pdfjs-dist": "^4.10.38",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "recharts": "^3.5.1",
+    "url": "^0.11.4",
+    "vite": "^7.3.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

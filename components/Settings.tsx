@@ -1,6 +1,8 @@
 
 import React, { useState } from 'react';
 import { db } from '../services/db';
+import { Login } from './Login';
+import { Signup } from './Signup';
 import { ShieldAlert, FileText, User, LogOut, Heart, Trash2, Info, ExternalLink, ShieldCheck, Scale, Download, Upload, RefreshCw, Database } from 'lucide-react';
 
 export const Settings: React.FC = () => {
@@ -8,12 +10,25 @@ export const Settings: React.FC = () => {
   const user = state.user;
   const [showTerms, setShowTerms] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [showLogin, setShowLogin] = useState(false);
+  const [showSignup, setShowSignup] = useState(false);
 
   const handleClearData = () => {
     if (confirm("Are you sure? This will delete all your food logs, flares, and bio-data forever. This cannot be undone.")) {
       db.clear();
       window.location.reload();
     }
+  };
+
+  const handleSignOut = () => {
+    // clear user session but keep health logs
+    db.updateUser(null);
+    // remove any stored auth tokens / sessions
+    try { localStorage.removeItem('auth_token'); } catch (e) {}
+    try { localStorage.removeItem('session'); } catch (e) {}
+    // navigate back to landing
+    try { window.history.pushState({}, '', '/'); } catch (e) {}
+    window.location.reload();
   };
 
   const handleExport = () => {
@@ -46,16 +61,34 @@ export const Settings: React.FC = () => {
         <h2 className="text-2xl font-black text-slate-800">Account & Safety</h2>
       </div>
 
+      {/* If no user - show signup / login */}
+      {!user && (
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+          <p className="font-bold text-slate-800 mb-3">Sign in or create an account to sync across devices (demo).</p>
+          <div className="flex gap-3">
+            <button onClick={() => { setShowLogin(!showLogin); setShowSignup(false); }} className="flex-1 bg-teal-600 text-white p-3 rounded-xl font-bold">Sign in</button>
+            <button onClick={() => { setShowSignup(!showSignup); setShowLogin(false); }} className="flex-1 bg-white border border-teal-600 text-teal-600 p-3 rounded-xl font-bold">Create account</button>
+          </div>
+
+          <div className="mt-4">
+            {showLogin && <Login onSuccess={() => window.location.reload()} />}
+            {showSignup && <Signup onSuccess={() => window.location.reload()} />}
+          </div>
+        </div>
+      )}
+
       {/* Profile Summary */}
-      <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
-        <div className="w-16 h-16 bg-teal-100 rounded-full flex items-center justify-center text-teal-600">
-          <User className="w-8 h-8" />
+      {user && (
+        <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-4">
+          <div className="w-16 h-16 bg-teal-100 rounded-full flex items-center justify-center text-teal-600">
+            <User className="w-8 h-8" />
+          </div>
+          <div>
+            <h3 className="font-bold text-slate-800 text-lg">{user?.name}</h3>
+            <p className="text-sm text-slate-400 font-medium">{user?.condition} • {user?.conditionSeverity}</p>
+          </div>
         </div>
-        <div>
-          <h3 className="font-bold text-slate-800 text-lg">{user?.name}</h3>
-          <p className="text-sm text-slate-400 font-medium">{user?.condition} • {user?.conditionSeverity}</p>
-        </div>
-      </div>
+      )}
 
       {/* Data Portability - HIGHLIGHTED SECTION */}
       <div className="space-y-3">
@@ -180,6 +213,17 @@ export const Settings: React.FC = () => {
           </div>
           <span className="text-[9px] font-medium text-slate-400 normal-case tracking-normal">Wipes all logs and profile data from your browser storage.</span>
         </button>
+        {user && (
+          <button
+            onClick={handleSignOut}
+            className="mt-3 w-full bg-white text-slate-700 py-4 rounded-2xl font-black text-sm uppercase tracking-widest flex flex-col items-center justify-center gap-1 hover:bg-slate-50 transition-all border border-slate-200"
+          >
+            <div className="flex items-center gap-2">
+              <LogOut className="w-4 h-4" /> Sign Out
+            </div>
+            <span className="text-[9px] font-medium text-slate-400 normal-case tracking-normal">Ends your session on this device.</span>
+          </button>
+        )}
       </div>
 
       <div className="text-center py-4">

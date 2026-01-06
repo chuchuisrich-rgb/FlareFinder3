@@ -156,6 +156,7 @@ export const Dashboard: React.FC = () => {
   };
 
   const currentScore = chartData.length > 0 ? chartData[chartData.length - 1].score : 0;
+    const isPro = Boolean(data?.user?.pro_until && Number(data.user.pro_until) > Date.now());
   
   const getWeatherIcon = (status?: string) => {
       if (status?.includes('Sunny')) return <Sun className="w-10 h-10 text-amber-200" />;
@@ -171,10 +172,15 @@ export const Dashboard: React.FC = () => {
                   {analysis?.dailyNarrative || `Synchronizing biology... Welcome back, ${data?.user?.name || 'User'}.`}
               </h1>
           </div>
-          <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-full shadow-sm border border-slate-100">
-             <Flame className="w-4 h-4 text-orange-500" fill="currentColor" />
-             <span className="font-black text-slate-700 text-sm">{streakDays}</span>
-          </div>
+                    <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-full shadow-sm border border-slate-100">
+                             <Flame className="w-4 h-4 text-orange-500" fill="currentColor" />
+                             <span className="font-black text-slate-700 text-sm">{streakDays}</span>
+                        </div>
+                        {isPro && (
+                            <div className="bg-amber-100 text-amber-800 px-3 py-1 rounded-full font-black text-sm">Pro</div>
+                        )}
+                    </div>
        </div>
 
        {analysis?.bioWeather && (
