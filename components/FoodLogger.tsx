@@ -39,6 +39,7 @@ export const FoodLogger: React.FC = () => {
   const [mode, setMode] = useState<'meal' | 'grocery'>('meal');
   const [isSavingStatus, setIsSavingStatus] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [pendingRemovals, setPendingRemovals] = useState<string[]>([]);
 
   useEffect(() => {
     loadHistory();
@@ -160,6 +161,65 @@ export const FoodLogger: React.FC = () => {
     }));
   };
 
+  // Remove an ingredient from a detected item with a brief exit animation
+  const removeIngredient = (itemIndex: number, ingIndex: number) => {
+    const key = `i-${itemIndex}-g-${ingIndex}`;
+    // mark pending removal to trigger CSS animation
+    setPendingRemovals(prev => [...prev, key]);
+    // after animation, actually remove from state and recalc
+    setTimeout(() => {
+      setPendingRemovals(prev => prev.filter(p => p !== key));
+      setAnalysisResult(prev => {
+        if (!prev) return prev;
+        const items = [...(prev.detectedItems || [])];
+        if (!items[itemIndex]) return prev;
+        const item = { ...items[itemIndex] } as FoodItem;
+
+  // handle two representations: ingredientAnalysis (objects) or ingredients (strings)
+        if (item.ingredientAnalysis && item.ingredientAnalysis.length > 0) {
+          const origCount = item.ingredientAnalysis.length;
+          item.ingredientAnalysis = item.ingredientAnalysis.filter((_, i) => i !== ingIndex);
+          const remaining = item.ingredientAnalysis.length;
+          // proportionally scale nutrition if present
+          if (item.nutrition && origCount > 0) {
+            const scale = remaining / origCount;
+            item.nutrition = {
+              calories: Math.round((item.nutrition.calories || 0) * scale),
+              protein: Math.round((item.nutrition.protein || 0) * scale),
+              carbs: Math.round((item.nutrition.carbs || 0) * scale),
+              fat: Math.round((item.nutrition.fat || 0) * scale),
+            };
+          }
+        } else if (item.ingredients && item.ingredients.length > 0) {
+          const origCount = item.ingredients.length;
+          item.ingredients = item.ingredients.filter((_, i) => i !== ingIndex);
+          const remaining = item.ingredients.length;
+          if (item.nutrition && origCount > 0) {
+            const scale = remaining / origCount;
+            item.nutrition = {
+              calories: Math.round((item.nutrition.calories || 0) * scale),
+              protein: Math.round((item.nutrition.protein || 0) * scale),
+              carbs: Math.round((item.nutrition.carbs || 0) * scale),
+              fat: Math.round((item.nutrition.fat || 0) * scale),
+            };
+          }
+        }
+
+        // if no ingredients remain, remove the whole item
+  const hasAnyIngredients = (item.ingredientAnalysis && item.ingredientAnalysis.length > 0) || (item.ingredients && item.ingredients.length > 0);
+        if (!hasAnyIngredients) {
+          items.splice(itemIndex, 1);
+        } else {
+          items[itemIndex] = item;
+        }
+
+        const updated = { ...prev, detectedItems: items } as Partial<typeof prev>;
+        // re-run sensitivities to refresh alerts and analysis
+        return annotateWithSensitivities(updated as Partial<FoodLog>);
+      });
+    }, 180);
+  };
+
   const handleDeleteLog = (e: React.MouseEvent, id: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -278,24 +338,32 @@ export const FoodLogger: React.FC = () => {
     return { ...res, detectedItems: items };
   };
 
-  const getMealVerdict = () => {
-    if (!analysisResult?.detectedItems || analysisResult.detectedItems.length === 0) return null;
-    const items = analysisResult.detectedItems;
-    let maxLevel = 'low';
-    items.forEach(item => {
-        if (item.sensitivityAlert?.level === 'high') maxLevel = 'high';
-        else if (item.sensitivityAlert?.level === 'medium' && maxLevel !== 'high') maxLevel = 'medium';
-        item.ingredientAnalysis?.forEach(ing => {
-            if (ing.safetyLevel === 'high') maxLevel = 'high';
-            else if (ing.safetyLevel === 'medium' && maxLevel !== 'high') maxLevel = 'medium';
-        });
-    });
-    if (maxLevel === 'high') return { label: 'AVOID', color: 'bg-rose-600', text: 'Critical Trigger Detected', icon: <ShieldAlert className="w-5 h-5" /> };
-    if (maxLevel === 'medium') return { label: 'CAUTION', color: 'bg-amber-500', text: 'Contains Potential Triggers', icon: <AlertTriangle className="w-5 h-5" /> };
-    return { label: 'SAFE', color: 'bg-emerald-600', text: 'Safe for your condition', icon: <ShieldCheck className="w-5 h-5" /> };
+  // Compute meal verdict from a given analysis result (checks all items + ingredients)
+  const getMealVerdict = (res: Partial<FoodLog> | null) => {
+    if (!res?.detectedItems || res.detectedItems.length === 0) return null;
+    const items = res.detectedItems;
+    let foundLevel: 'low' | 'medium' | 'high' = 'low';
+    for (const item of items) {
+      // First prefer explicit ingredientAnalysis safety levels
+      if (item.ingredientAnalysis && item.ingredientAnalysis.length > 0) {
+        for (const ing of item.ingredientAnalysis) {
+          if (ing.safetyLevel === 'high') return { label: 'AVOID', color: 'bg-rose-600', text: 'Critical Trigger Detected', icon: <ShieldAlert className="w-5 h-5" /> };
+          if (ing.safetyLevel === 'medium') foundLevel = 'medium';
+        }
+      } else {
+        // fallback to item-level sensitivity if ingredient-level data missing
+        if (item.sensitivityAlert?.level === 'high') return { label: 'AVOID', color: 'bg-rose-600', text: 'Critical Trigger Detected', icon: <ShieldAlert className="w-5 h-5" /> };
+        if (item.sensitivityAlert?.level === 'medium') foundLevel = 'medium';
+      }
+    }
+    if (foundLevel === 'medium') return { label: 'CAUTION', color: 'bg-amber-500', text: 'Moderate Trigger Detected', icon: <AlertTriangle className="w-5 h-5" /> };
+    return { label: 'SAFE', color: 'bg-emerald-600', text: 'Healthy / No Triggers', icon: <ShieldCheck className="w-5 h-5" /> };
   };
 
-  const renderIngredientAnalysis = (item: FoodItem) => {
+  // Recompute verdict whenever analysisResult changes so the banner updates immediately after deletions
+  const verdict = React.useMemo(() => getMealVerdict(analysisResult), [analysisResult]);
+
+  const renderIngredientAnalysis = (item: FoodItem, itemIndex: number) => {
     const analysis = item.ingredientAnalysis || [];
     return (
       <div className="mt-4 space-y-4">
@@ -306,25 +374,43 @@ export const FoodLogger: React.FC = () => {
             </h4>
             <div className="flex flex-wrap gap-1.5">
               {analysis.length > 0 ? (
-                analysis.map((ing, i) => (
-                    <div key={i} className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold shadow-sm flex items-center gap-1.5 ${
-                        ing.safetyLevel === 'high' ? 'bg-rose-50 border-rose-200 text-rose-700' :
-                        ing.safetyLevel === 'medium' ? 'bg-amber-50 border-amber-200 text-amber-700' :
-                        'bg-emerald-50 border-emerald-100 text-emerald-700'
-                    }`}>
-                        <div className={`w-1.5 h-1.5 rounded-full ${ing.safetyLevel === 'high' ? 'bg-rose-500' : ing.safetyLevel === 'medium' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
-                        {ing.name}
+                analysis.map((ing, i) => {
+                    const pillKey = `i-${itemIndex}-g-${i}`;
+                    const isPending = pendingRemovals.includes(pillKey);
+                    return (
+                    <div key={i} className={`flex items-center gap-1.5 ${isPending ? 'opacity-0 scale-95 h-0 p-0 overflow-hidden' : 'transition-all'} rounded-lg`}> 
+                      <div className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold shadow-sm flex items-center gap-1.5 ${
+                          ing.safetyLevel === 'high' ? 'bg-rose-50 border-rose-200 text-rose-700' :
+                          ing.safetyLevel === 'medium' ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                          'bg-emerald-50 border-emerald-100 text-emerald-700'
+                      }`}>
+                          <div className={`w-1.5 h-1.5 rounded-full ${ing.safetyLevel === 'high' ? 'bg-rose-500' : ing.safetyLevel === 'medium' ? 'bg-amber-500' : 'bg-emerald-500'}`} />
+                          <span>{ing.name}</span>
+                      </div>
+                      <button onClick={() => removeIngredient(itemIndex, i)} title="Remove ingredient" className="p-1 text-slate-400 hover:text-rose-500 transition-colors rounded-full">
+                          <X className="w-3 h-3" />
+                      </button>
                     </div>
-                ))
+                    );
+                })
               ) : (
                 item.ingredients?.map((name, i) => {
+                    const pillKey = `i-${itemIndex}-g-${i}`;
+                    const isPending = pendingRemovals.includes(pillKey);
                     const trigger = item.sensitivityAlert?.triggerIngredient;
                     const matchesTrigger = trigger ? name.toLowerCase().includes(trigger.toLowerCase()) : false;
                     const level = matchesTrigger ? item.sensitivityAlert?.level : undefined;
                     const classes = level === 'high' ? 'px-2 py-1 rounded text-[10px] font-medium border border-rose-200 bg-rose-50 text-rose-700' :
                                     level === 'medium' ? 'px-2 py-1 rounded text-[10px] font-medium border border-amber-200 bg-amber-50 text-amber-700' :
                                     'px-2 py-1 bg-slate-100 text-slate-600 rounded text-[10px] font-medium border border-slate-200';
-                    return <span key={i} className={classes}>{name}</span>;
+                    return (
+                      <div key={i} className={`${isPending ? 'opacity-0 scale-95 h-0 p-0 overflow-hidden' : 'transition-all flex items-center gap-1.5'}`}>
+                        <span className={classes}>{name}</span>
+                        <button onClick={() => removeIngredient(itemIndex, i)} title="Remove ingredient" className="p-1 text-slate-400 hover:text-rose-500 transition-colors rounded-full">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
                 })
               )}
             </div>
@@ -374,7 +460,7 @@ export const FoodLogger: React.FC = () => {
     );
   }
 
-  const verdict = getMealVerdict();
+  
 
   return (
     <div className="space-y-8 pb-20">
@@ -498,7 +584,7 @@ export const FoodLogger: React.FC = () => {
                 </div>
             )}
            <div className="space-y-4">
-                {analysisResult.detectedItems?.map((item, idx) => (
+        {analysisResult.detectedItems?.map((item, idx) => (
                 <div key={idx} className={`bg-white p-6 rounded-3xl shadow-sm border-2 transition-all ${
                     item.sensitivityAlert?.level === 'high' || item.ingredientAnalysis?.some(i => i.safetyLevel === 'high') ? 'border-rose-200' : 
                     item.sensitivityAlert?.level === 'medium' || item.ingredientAnalysis?.some(i => i.safetyLevel === 'medium') ? 'border-amber-200' : 
@@ -510,9 +596,9 @@ export const FoodLogger: React.FC = () => {
                             <Trash2 className="w-5 h-5" />
                         </button>
                     </div>
-                    {renderIngredientAnalysis(item as FoodItem)}
+          {renderIngredientAnalysis(item as FoodItem, idx)}
                 </div>
-                ))}
+        ))}
            </div>
            <div className="bg-white border-2 border-dashed border-slate-200 rounded-[2rem] p-6 shadow-sm">
               <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
