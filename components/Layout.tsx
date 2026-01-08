@@ -1,5 +1,5 @@
 
-import { LayoutDashboard, Camera, Flame, Activity, Settings, ShoppingBag } from 'lucide-react';
+import { LayoutDashboard, Camera, Flame, Activity, Settings, ShoppingBag, CloudSun } from 'lucide-react';
 import React from 'react';
 import { DISCLOSURE_SECTIONS } from '../src/content/legal/disclosure_v1';
 
@@ -54,6 +54,12 @@ export const Layout: React.FC<LayoutProps> = ({ children, activeTab, onTabChange
             onClick={() => onTabChange('dashboard')} 
             icon={<LayoutDashboard />} 
             label="Home" 
+          />
+          <NavButton 
+            active={activeTab === 'forecast'}
+            onClick={() => onTabChange('forecast')}
+            icon={<CloudSun />}
+            label="Forecast"
           />
           <NavButton 
             active={activeTab === 'food'} 

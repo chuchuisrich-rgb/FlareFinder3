@@ -13,7 +13,7 @@ import {
 } from 'recharts';
 import { LabManager } from './LabManager';
 
-export const Dashboard: React.FC = () => {
+export const Dashboard: React.FC<{ onNewForecast?: (item: any) => void }> = ({ onNewForecast }) => {
   const [data, setData] = useState<AppState | null>(null);
   const [loadingInsights, setLoadingInsights] = useState(false);
   const [chartData, setChartData] = useState<any[]>([]);
@@ -128,6 +128,16 @@ export const Dashboard: React.FC = () => {
           if (result) {
               setAnalysis(result);
               db.saveAnalysis(result);
+              // send textual forecast to Forecast page and navigate
+              if (onNewForecast) {
+                onNewForecast({
+                  type: 'forecast',
+                  title: 'Neural Forecast',
+                  subtitle: result.bioWeather?.headline || '',
+                  body: result.dailyNarrative || result.bioWeather || result,
+                  date: new Date().toISOString()
+                });
+              }
           }
       } catch (e) {
           alert("Neural engine busy. Retrying...");
@@ -145,8 +155,17 @@ export const Dashboard: React.FC = () => {
       try {
           const report = await runFlareDetective(data);
           if (report) {
-            setDetectiveReport(report);
-            db.saveFlareDetectiveReport(report);
+                        setDetectiveReport(report);
+                        db.saveFlareDetectiveReport(report);
+                        if (onNewForecast) {
+                            onNewForecast({
+                                type: 'detective',
+                                title: 'Flare Detective',
+                                subtitle: report.conclusion || '',
+                                body: report,
+                                date: new Date().toISOString()
+                            });
+                        }
           }
       } catch (e) {
           alert("Detective analysis failed.");
@@ -169,8 +188,9 @@ export const Dashboard: React.FC = () => {
        <div className="flex justify-between items-start">
           <div className="flex-1 pr-4">
               <h1 className="text-xl font-black text-slate-800 leading-tight">
-                  {analysis?.dailyNarrative || `Synchronizing biology... Welcome back, ${data?.user?.name || 'User'}.`}
+                  {`Welcome back, ${data?.user?.name || 'User'}.`}
               </h1>
+              <p className="text-sm text-slate-500 mt-1">Inflammation index and heartbeat chart are shown below. Detailed forecasts appear in the Forecast tab.</p>
           </div>
                     <div className="flex items-center gap-2">
                         <div className="flex items-center gap-1.5 bg-white px-3 py-1.5 rounded-full shadow-sm border border-slate-100">
@@ -183,49 +203,7 @@ export const Dashboard: React.FC = () => {
                     </div>
        </div>
 
-       {analysis?.bioWeather && (
-         <div className="relative group">
-           <div className={`rounded-[2.5rem] p-7 shadow-2xl relative overflow-hidden transition-all duration-500 ${
-               analysis.bioWeather.status?.includes('Sunny') ? 'bg-gradient-to-br from-teal-500 to-emerald-600 text-white shadow-emerald-200' :
-               analysis.bioWeather.status?.includes('Stormy') ? 'bg-gradient-to-br from-slate-800 to-slate-900 text-white shadow-slate-400' :
-               'bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-indigo-200'
-           }`}>
-              <div className="flex justify-between items-start relative z-10">
-                 <div className="space-y-1">
-                    <span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-70">Neural Forecast</span>
-                    <h2 className="text-4xl font-black tracking-tight">{analysis.bioWeather.status}</h2>
-                    <p className="font-bold text-lg leading-tight opacity-90">{analysis.bioWeather.headline}</p>
-                 </div>
-                 <div className="bg-white/10 p-4 rounded-3xl backdrop-blur-md border border-white/20">
-                    {getWeatherIcon(analysis.bioWeather.status)}
-                 </div>
-              </div>
-              <div className="mt-6 pt-5 border-t border-white/10 relative z-10">
-                  <p className="text-sm font-medium opacity-80 leading-relaxed">{analysis.bioWeather.summary}</p>
-              </div>
-              <div className="absolute -right-10 -bottom-10 w-48 h-48 bg-white/5 rounded-full blur-3xl" />
-           </div>
-
-           {analysis.dailyProtocol && (
-               <div className="grid grid-cols-2 gap-3 mt-4">
-                   {[
-                       { icon: <Utensils className="w-4 h-4 text-emerald-500" />, label: 'Fuel', text: analysis.dailyProtocol.nutritionFocus },
-                       { icon: <Activity className="w-4 h-4 text-rose-500" />, label: 'Biokinetics', text: analysis.dailyProtocol.movement },
-                       { icon: <Shield className="w-4 h-4 text-indigo-500" />, label: 'Defense', text: analysis.dailyProtocol.selfCare },
-                       { icon: <BrainCircuit className="w-4 h-4 text-amber-500" />, label: 'Neural', text: analysis.dailyProtocol.mindset }
-                   ].map((item, i) => (
-                       <div key={i} className="bg-white p-4 rounded-3xl shadow-sm border border-slate-100 hover:shadow-md transition-shadow">
-                           <div className="flex items-center gap-2 mb-2">
-                               {item.icon}
-                               <h4 className="font-black text-slate-400 text-[10px] uppercase tracking-widest">{item.label}</h4>
-                           </div>
-                           <p className="text-xs font-bold text-slate-700 leading-snug">{item.text}</p>
-                       </div>
-                   ))}
-               </div>
-           )}
-         </div>
-       )}
+       {/* Analysis / Forecast text removed from Home — moved to Forecast tab */}
 
        <div className="bg-slate-900 rounded-[2.5rem] p-7 text-white shadow-2xl shadow-slate-200 relative overflow-hidden">
            <div className="absolute top-0 right-0 w-64 h-64 bg-teal-500/10 rounded-full blur-3xl -mr-20 -mt-20" />
@@ -309,26 +287,7 @@ export const Dashboard: React.FC = () => {
            </div>
        )}
 
-       {detectiveReport && (
-           <div className="bg-indigo-50 border border-indigo-100 p-6 rounded-[2.5rem] shadow-sm animate-in slide-in-from-bottom-4 duration-500">
-               <div className="flex items-center gap-3 mb-5">
-                   <div className="bg-indigo-600 p-2.5 rounded-xl"><Microscope className="w-5 h-5 text-white" /></div>
-                   <h3 className="font-black text-indigo-900 uppercase tracking-widest text-xs">Detective Audit Report</h3>
-               </div>
-               <p className="text-sm font-bold text-indigo-900 leading-relaxed mb-6 italic">"{detectiveReport.conclusion}"</p>
-               <div className="space-y-3">
-                   {detectiveReport.suspects.map((s, i) => (
-                       <div key={i} className="bg-white/60 backdrop-blur-sm p-4 rounded-2xl border border-indigo-200 flex justify-between items-center">
-                           <div className="flex-1 pr-4">
-                               <p className="text-xs font-black text-slate-800">{s.name}</p>
-                               <p className="text-[10px] text-slate-500 font-medium leading-tight mt-1">{s.reason}</p>
-                           </div>
-                           <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-1 rounded-lg border border-indigo-100 uppercase">{Math.round(s.confidence * 100)}% Conf.</span>
-                       </div>
-                   ))}
-               </div>
-           </div>
-       )}
+       {/* Detective report details moved to Forecast tab */}
 
        <div className="grid grid-cols-2 gap-4">
           <button onClick={() => setShowLabs(true)} className="col-span-2 w-full bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col items-center gap-3 hover:border-indigo-200 active:scale-95 transition-all">

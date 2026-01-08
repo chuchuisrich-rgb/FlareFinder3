@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { db } from './services/db';
 import { Layout } from './components/Layout';
 import { Dashboard } from './components/Dashboard';
+import { Forecast } from './components/Forecast';
 import { FoodLogger } from './components/FoodLogger';
 import { FlareLogger } from './components/FlareLogger';
 import { DailyTracker } from './components/DailyTracker';
@@ -14,6 +15,7 @@ export default function App() {
   const [initialized, setInitialized] = useState(false);
   const [isOnboarded, setIsOnboarded] = useState(false);
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [forecastItems, setForecastItems] = useState<any[]>([]);
 
   useEffect(() => {
     const state = db.getState();
@@ -32,9 +34,15 @@ export default function App() {
   const renderContent = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <Dashboard />;
+        return <Dashboard onNewForecast={(item: any) => {
+          // prepend new forecast item
+          setForecastItems(prev => [item, ...prev]);
+          setActiveTab('forecast');
+        }} />;
       case 'food':
         return <FoodLogger />;
+      case 'forecast':
+        return <Forecast items={forecastItems} />;
       case 'shop':
         return <Marketplace />;
       case 'flare':
